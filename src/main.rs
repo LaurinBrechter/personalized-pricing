@@ -1,13 +1,13 @@
-use rand::{rngs::ThreadRng, Rng};
-use rand_distr::{Normal, Exp};
+use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
-use std::{
-    collections::{HashMap, VecDeque}, process::exit, vec
-};
+use rand::{rngs::ThreadRng, Rng};
+use rand_distr::{Exp, Normal};
 use std::cmp::Reverse;
+use std::collections::HashMap;
 
 #[derive(Debug)]
 struct ProblemSettings {
+    n_visits: i32,
     n_periods: i32,
     n_groups: i32,
     n_customers: i32,
@@ -15,8 +15,33 @@ struct ProblemSettings {
 }
 
 struct Solution {
-    prices: Vec<Vec<Vec<f64>>>,
-    prices_h: HashMap<i32, HashMap<i32, Vec<f64>>>,
+    // prices: Vec<Vec<Vec<f64>>>,
+    prices: HashMap<i32, HashMap<i32, Vec<f64>>>,
+}
+
+impl Solution {
+    fn new(n_visits: i32, n_periods: i32, n_groups: i32) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut prices = HashMap::new();
+
+        for w in 0..n_visits {
+            let mut group_map = HashMap::new();
+            for g in 0..n_groups {
+                let mut period_prices = Vec::new();
+                for _ in 0..n_periods {
+                    period_prices.push(rng.gen_range(0.0..100.0));
+                }
+                group_map.insert(g, period_prices);
+            }
+            prices.insert(w, group_map);
+        }
+
+        Self { prices }
+    }
+
+    fn get_price(&self, w: i32, g: i32, t: i32) -> f64 {
+        self.prices[&w][&g][t as usize]
+    }
 }
 
 #[derive(Debug)]
@@ -31,9 +56,9 @@ struct Customer<'a> {
     settings: &'a ProblemSettings,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Hash, Eq, PartialEq, Clone)]
 struct SimulationEvent {
-    t: f32,
+    t: OrderedFloat<f32>,
     event: String,
     customer: i32,
 }
@@ -71,26 +96,26 @@ impl<'a> Customer<'a> {
     fn update_wtp(&mut self) {}
     fn next_visit(&self, rng: &mut ThreadRng) -> f32 {
         let distr = Exp::new(0.1).unwrap();
-        return rng.sample::<f32, _>(distr)
+        return rng.sample::<f32, _>(distr);
     }
 }
 
 fn init_simulation(
     settings: &ProblemSettings,
     customers: &Vec<Customer>,
-) -> VecDeque<SimulationEvent> {
+) -> PriorityQueue<SimulationEvent, Reverse<OrderedFloat<f32>>> {
     let mut rng = rand::thread_rng();
 
-    
-    let mut event_calendar: VecDeque<SimulationEvent> = VecDeque::new();
+    let mut event_calendar: PriorityQueue<SimulationEvent, Reverse<OrderedFloat<f32>>> =
+        PriorityQueue::new();
 
     for customer in customers {
         let event = SimulationEvent {
-            t: customer.next_visit(&mut rng),
+            t: OrderedFloat(customer.next_visit(&mut rng)),
             event: "customer_arrival".to_string(),
             customer: customer.group.try_into().unwrap(),
         };
-        event_calendar.push_back(event);
+        event_calendar.push(event.clone(), Reverse(event.t));
     }
 
     return event_calendar;
@@ -102,15 +127,20 @@ fn main() {
     // normal dist
     let mut rng = rand::thread_rng();
     let scaling = 100.0;
-    let group_sizes = vec![20, 10, 70];
+    let group_sizes = vec![2, 1, 3];
     let group_means = vec![2.0, 5.0, 1.25];
     let mut customers: Vec<Customer> = vec![];
     let settings = ProblemSettings {
-        n_customers: 100,
-        n_periods: 100,
+        n_customers: group_sizes.iter().sum(),
+        n_periods: 1,
         n_groups: 3,
         tau: 0.5,
+        n_visits: 10,
     };
+
+    let solution = Solution::new(settings.n_visits, settings.n_periods, settings.n_groups);
+
+    println!("{:?}", solution.prices);
 
     for i in 0..group_sizes.len() {
         let group_mean = group_means[i];
@@ -123,40 +153,45 @@ fn main() {
         }
     }
 
+    println!("{:?}\n", customers);
+
     let mut event_calendar = init_simulation(&settings, &customers);
 
-
-    let mut pq = PriorityQueue::new();
-
-    pq.push("Strawberries", Reverse(2.0));
-    pq.push("Apples", Reverse(5.0));
-    pq.push("Bananas", Reverse(8.0));
-
-    println!("{:?}", pq.pop());
-    println!("{:?}", pq.pop());
-    println!("{:?}", pq.pop());
-
-    exit(0);
-
+    let mut revenue = 0.0;
     while !event_calendar.is_empty() {
-        let event = event_calendar.pop_front();
+        let event = event_calendar.pop();
         if event.is_none() {
             break;
         }
         let event = event.unwrap();
 
-        if event.t > settings.n_periods as f32 {
+        println!("{:?}", event);
+
+        if event.0.t > OrderedFloat(settings.n_periods as f32) {
             continue;
         }
 
-        let customer = &customers[event.customer as usize];
+        let customer = &customers[event.0.customer as usize];
 
         let next_visit = customer.next_visit(&mut rng);
 
+        let price = solution.get_price(
+            customer.price_hist.len() as i32, // wth visit
+            customer.group, // gth group
+            event.0.t.0 as i32, // tth period
+        );
 
-
-        println!("{:?}", event);
+        if price < customer.wtp {
+            println!("Customer {} bought at price {}", customer.group, price);
+            revenue += price;
+            
+            // remove from simulation
+            customers.remove(event.0.customer as usize);
+        }
     }
+
+    println!("Total revenue: {}", revenue);
 
     // println!("{:?}", customers);
 }
+
