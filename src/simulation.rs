@@ -5,8 +5,7 @@ use rand_distr::{Exp, Normal};
 use std::cmp::Reverse;
 use std::collections::HashMap;
 
-
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Customer<'a> {
     id: i32,
     group: i32,
@@ -27,7 +26,13 @@ pub struct SimulationEvent {
 }
 
 impl<'a> Customer<'a> {
-    pub fn new(id: i32, group: i32, wtp_min: f64, wtp_max: f64, settings: &'a ProblemSettings) -> Self {
+    pub fn new(
+        id: i32,
+        group: i32,
+        wtp_min: f64,
+        wtp_max: f64,
+        settings: &'a ProblemSettings,
+    ) -> Self {
         let mut rng = rand::thread_rng();
         let wtp: f64 = rng.gen_range(wtp_min..=wtp_max);
         Customer {
@@ -42,10 +47,14 @@ impl<'a> Customer<'a> {
             settings,
         }
     }
+    // LABEL
     pub fn update_irp(&mut self, new_price: f64) {
         self.irp = self.irp + self.settings.tau * (new_price - self.irp)
     }
-    pub fn update_erp(&mut self, other_customers: Vec<&Customer>) {
+
+    // TODO: implement aggregation via network.
+    // LABEL
+    pub fn update_erp(&mut self, other_customers: &Vec<Customer>) {
         let mut rng = rand::thread_rng();
         let mut ref_prices: Vec<f64> = vec![];
         for cust in other_customers {
@@ -56,54 +65,73 @@ impl<'a> Customer<'a> {
             }
         }
     }
-    pub fn update_rp(&mut self) {}
-    pub fn update_wtp(&mut self) {}
+    // LABEL
+    pub fn update_rp(&mut self) {
+        if (self.erp > self.irp) {
+            self.rp = self.irp;
+        } else {
+            self.rp = self.settings.eta * self.erp + (1.0 - self.settings.eta) * self.irp;
+        }
+    }
+
+    // LABEL
+    pub fn update_wtp(&mut self) {
+        if self.rp > self.wtp {
+            self.wtp += (self.rp - self.wtp).powf(self.settings.alpha);
+        } else {
+            self.wtp -= self.settings.lambda * (self.wtp - self.rp).powf(self.settings.alpha);
+        }
+    }
+
+    // LABEL
     pub fn next_visit(&self, rng: &mut ThreadRng, t: f32) -> f32 {
         let distr = Exp::new(0.1).unwrap();
         return t + rng.sample::<f32, _>(distr);
     }
 }
 
-// Move ProblemSettings, Customer, SimulationEvent, and Solution here
 #[derive(Debug)]
 pub struct ProblemSettings {
-    pub n_visits: i32,
-    pub n_periods: i32,
-    pub n_groups: i32,
-    pub n_customers: i32,
-    pub tau: f64,
-    pub scaling: f64,
-    pub group_sizes: Vec<i32>,
-    pub group_means: Vec<f64>,
+    pub n_visits: i32,         // number of visits
+    pub n_periods: i32,        // number of periods
+    pub n_groups: i32,         // number of groups
+    pub n_customers: i32,      // total number of customers
+    pub tau: f64,              // how much customers are influenced by the current price
+    pub scaling: f64,          // scaling factor for the normal distribution
+    pub group_sizes: Vec<i32>, // number of customers in each group
+    pub group_means: Vec<f64>, // mean wtp for each group
+    pub alpha: f64,
+    pub lambda: f64, // loss aversion
+    pub eta: f64,    // price sensitivity
 }
 
 #[derive(Clone)]
 pub struct Solution {
-    pub prices: HashMap<i32, HashMap<i32, Vec<f64>>>,
+    pub prices: HashMap<usize, HashMap<usize, Vec<f64>>>,
 }
 
 impl Solution {
-    pub fn new(n_visits: i32, n_periods: i32, n_groups: i32) -> Self {
+    pub fn new(n_visits: usize, n_periods: usize, n_groups: usize) -> Self {
         let mut rng = rand::thread_rng();
         let mut prices = HashMap::new();
 
-        for w in 0..n_visits {
+        for g in 0..n_groups {
             let mut group_map = HashMap::new();
-            for g in 0..n_groups {
+            for w in 0..n_visits {
                 let mut period_prices = Vec::new();
                 for _ in 0..n_periods {
                     period_prices.push(rng.gen_range(0.0..100.0));
                 }
-                group_map.insert(g, period_prices);
+                group_map.insert(w, period_prices);
             }
-            prices.insert(w, group_map);
+            prices.insert(g, group_map);
         }
 
         Self { prices }
     }
 
-    fn get_price(&self, w: i32, g: i32, t: i32) -> f64 {
-        self.prices[&w][&g][t as usize]
+    fn get_price(&self, w: usize, g: usize, t: usize) -> f64 {
+        self.prices[&g][&w][t]
     }
 }
 
@@ -162,9 +190,9 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
         let next_visit = customers[customer_idx].next_visit(&mut rng, event.0.t.0);
         let visit_index = customers[customer_idx].price_hist.len() as i32;
         let price = solution.get_price(
-            visit_index,
-            customers[customer_idx].group,
-            event.0.t.0 as i32,
+            visit_index as usize,
+            customers[customer_idx].group as usize,
+            event.0.t.0 as usize,
         );
         if price < customers[customer_idx].wtp {
             revenue += price;
@@ -177,6 +205,11 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
             };
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }
+        let customers_copy = customers.to_vec();
+        customers[customer_idx].update_irp(price);
+        customers[customer_idx].update_erp(&customers_copy);
+        customers[customer_idx].update_rp();
+        customers[customer_idx].update_wtp();
     }
 
     revenue
