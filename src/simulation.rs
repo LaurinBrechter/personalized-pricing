@@ -1,9 +1,9 @@
+use crate::evolution::Individual;
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
 use rand_distr::{Exp, Normal};
 use std::cmp::Reverse;
-use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
 pub struct Customer<'a> {
@@ -14,15 +14,15 @@ pub struct Customer<'a> {
     rp: f64,
     wtp: f64,
     price_hist: Vec<f64>,
-    visit_hist: Vec<i32>,
+    // visit_hist: Vec<i32>,
     settings: &'a ProblemSettings,
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
 pub struct SimulationEvent {
-    t: OrderedFloat<f32>,
-    event: String,
-    customer: i32,
+    pub t: OrderedFloat<f32>,
+    pub event: String,
+    pub customer: i32,
 }
 
 impl<'a> Customer<'a> {
@@ -43,7 +43,7 @@ impl<'a> Customer<'a> {
             rp: -1.0,
             wtp,
             price_hist: vec![],
-            visit_hist: vec![],
+            // visit_hist: vec![],
             settings,
         }
     }
@@ -67,7 +67,7 @@ impl<'a> Customer<'a> {
     }
     // LABEL
     pub fn update_rp(&mut self) {
-        if (self.erp > self.irp) {
+        if self.erp > self.irp {
             self.rp = self.irp;
         } else {
             self.rp = self.settings.eta * self.erp + (1.0 - self.settings.eta) * self.irp;
@@ -105,36 +105,6 @@ pub struct ProblemSettings {
     pub eta: f64,    // price sensitivity
 }
 
-#[derive(Clone)]
-pub struct Solution {
-    pub prices: HashMap<usize, HashMap<usize, Vec<f64>>>,
-}
-
-impl Solution {
-    pub fn new(n_visits: usize, n_periods: usize, n_groups: usize) -> Self {
-        let mut rng = rand::thread_rng();
-        let mut prices = HashMap::new();
-
-        for g in 0..n_groups {
-            let mut group_map = HashMap::new();
-            for w in 0..n_visits {
-                let mut period_prices = Vec::new();
-                for _ in 0..n_periods {
-                    period_prices.push(rng.gen_range(0.0..100.0));
-                }
-                group_map.insert(w, period_prices);
-            }
-            prices.insert(g, group_map);
-        }
-
-        Self { prices }
-    }
-
-    fn get_price(&self, w: usize, g: usize, t: usize) -> f64 {
-        self.prices[&g][&w][t]
-    }
-}
-
 pub fn init_simulation(
     customers: &Vec<Customer>,
 ) -> PriorityQueue<SimulationEvent, Reverse<OrderedFloat<f32>>> {
@@ -155,8 +125,16 @@ pub fn init_simulation(
     return event_calendar;
 }
 
+pub struct SimulationResult {
+    pub regret: f64,
+    pub n_sold: f64,
+    pub avg_sold_at: f32,
+    pub event_history: Vec<SimulationEvent>,
+    pub revenue: f64,
+}
+
 // do one simulation run
-pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 {
+pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> SimulationResult {
     let mut rng = rand::thread_rng();
 
     let mut customers: Vec<Customer> = Vec::new();
@@ -174,8 +152,14 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
 
     let mut event_calendar = init_simulation(&customers);
     let mut revenue = 0.0;
+    let mut regret = 0.0;
+    let mut n_sold = 0;
     let max_events = 1000;
     let mut event_count = 0;
+    let mut avg_sold_at = 0.0;
+
+    let mut event_history: Vec<SimulationEvent> = Vec::new();
+
     while !event_calendar.is_empty() && event_count < max_events {
         event_count += 1;
         let event = event_calendar.pop();
@@ -186,10 +170,13 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
         if event.0.t > OrderedFloat(settings.n_periods as f32) {
             continue;
         }
+
+        event_history.push(event.0.clone());
+
         let customer_idx = event.0.customer as usize;
         let next_visit = customers[customer_idx].next_visit(&mut rng, event.0.t.0);
         let visit_index = customers[customer_idx].price_hist.len() as i32;
-        let price = solution.get_price(
+        let price = individual.get_price(
             visit_index as usize,
             customers[customer_idx].group as usize,
             event.0.t.0 as usize,
@@ -197,6 +184,15 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
         if price < customers[customer_idx].wtp {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
+            regret += customers[customer_idx].wtp - price;
+            n_sold += 1;
+            avg_sold_at += event.0.t.0;
+
+            event_history.push(SimulationEvent {
+                t: OrderedFloat(event.0.t.0),
+                event: "sold".to_string(),
+                customer: event.0.customer,
+            });
         } else {
             let next_event = SimulationEvent {
                 t: OrderedFloat(next_visit),
@@ -212,5 +208,11 @@ pub fn simulate_revenue(solution: &Solution, settings: &ProblemSettings) -> f64 
         customers[customer_idx].update_wtp();
     }
 
-    revenue
+    return SimulationResult {
+        regret,
+        n_sold: n_sold as f64 / customers.len() as f64,
+        avg_sold_at: avg_sold_at / n_sold as f32,
+        event_history,
+        revenue,
+    };
 }

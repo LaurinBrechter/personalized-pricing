@@ -21,8 +21,29 @@ fn main() {
     let algorithm_settings = AlgorithmSettings {
         num_generations: 10,
         population_size: 10,
+        lambda: 10,
+        mu: 5,
+        p: 2,
     };
 
     let best_solution = evolve_pricing(&settings, &algorithm_settings);
-    // println!("Best solution: {:?}", best_solution);
+
+    // Save best solution's prices to CSV
+    let mut writer = csv::Writer::from_path("event_history.csv").unwrap();
+
+    // Write header row
+    let header = vec!["t", "event", "customer"];
+    writer.write_record(&header).unwrap();
+
+    // Write price data
+    for event in best_solution.event_history {
+        writer
+            .write_record(&[
+                event.t.to_string(),
+                event.event.to_string(),
+                event.customer.to_string(),
+            ])
+            .unwrap();
+    }
+    writer.flush().unwrap();
 }

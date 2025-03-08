@@ -1,15 +1,64 @@
 use std::collections::HashMap;
 
-use crate::simulation::{simulate_revenue, ProblemSettings, Solution};
+use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
 use rand::Rng;
 
 pub struct AlgorithmSettings {
     pub num_generations: i32,
     pub population_size: i32,
+    pub lambda: i32, // number of offspring
+    pub mu: i32,     // population size
+    pub p: i32,      // number of parents participating in recombination
 }
 
-fn mutate_solution(solution: &Solution, _settings: &ProblemSettings) -> Solution {
-    let mut new_prices = solution.prices.clone();
+#[derive(Clone, Debug)]
+pub struct Individual {
+    pub prices: HashMap<usize, HashMap<usize, Vec<f64>>>,
+    pub event_history: Vec<SimulationEvent>,
+    pub fitness_score: f64,
+}
+
+impl Individual {
+    pub fn new(
+        n_visits: usize,
+        n_periods: usize,
+        n_groups: usize,
+        settings: &ProblemSettings,
+    ) -> Self {
+        let mut rng = rand::thread_rng();
+        let mut prices = HashMap::new();
+
+        for g in 0..n_groups {
+            let mut group_map = HashMap::new();
+            for w in 0..n_visits {
+                let mut period_prices = Vec::new();
+                for _ in 0..n_periods {
+                    period_prices.push(rng.gen_range(0.0..100.0));
+                }
+                group_map.insert(w, period_prices);
+            }
+            prices.insert(g, group_map);
+        }
+
+        let mut ind = Self {
+            prices,
+            event_history: vec![],
+            fitness_score: 0.0,
+        };
+
+        let result = simulate_revenue(&ind, settings);
+        ind.event_history = result.event_history;
+        ind.fitness_score = result.revenue;
+        ind
+    }
+
+    pub fn get_price(&self, w: usize, g: usize, t: usize) -> f64 {
+        self.prices[&g][&w][t]
+    }
+}
+
+fn mutate_solution(individual: &Individual, _settings: &ProblemSettings) -> Individual {
+    let mut new_prices = individual.prices.clone();
     let mut rng = rand::thread_rng();
 
     // iterate over all prices and mutate them
@@ -30,7 +79,11 @@ fn mutate_solution(solution: &Solution, _settings: &ProblemSettings) -> Solution
             }
         }
     }
-    Solution { prices: new_prices }
+    Individual {
+        prices: new_prices,
+        event_history: vec![],
+        fitness_score: 0.0,
+    }
 }
 
 fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
@@ -48,12 +101,12 @@ fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
     new_vector
 }
 
-fn intermediate_recombination(solutions: Vec<Solution>) -> Solution {
+fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
     let mut prices = HashMap::new();
 
-    let n_groups = solutions[0].prices.len();
-    let n_visits = solutions[0].prices[&0].len();
-    let n_periods = solutions[0].prices[&0][&0].len();
+    let n_groups = individuals[0].prices.len();
+    let n_visits = individuals[0].prices[&0].len();
+    let n_periods = individuals[0].prices[&0][&0].len();
 
     // init empty prices
     for g in 0..n_groups {
@@ -67,8 +120,8 @@ fn intermediate_recombination(solutions: Vec<Solution>) -> Solution {
         }
         prices.insert(g, group_map);
     }
-    for (s) in solutions.iter() {
-        for (g, group_map) in s.prices.iter() {
+    for (i) in individuals.iter() {
+        for (g, group_map) in i.prices.iter() {
             for (w, period_prices) in group_map.iter() {
                 for (t, price) in period_prices.iter().enumerate() {
                     prices.get_mut(g).unwrap().get_mut(w).unwrap()[t] += price;
@@ -76,22 +129,27 @@ fn intermediate_recombination(solutions: Vec<Solution>) -> Solution {
             }
         }
     }
-    Solution { prices }
+    Individual {
+        prices,
+        event_history: vec![],
+        fitness_score: 0.0,
+    }
 }
 
 pub fn evolve_pricing(
     settings: &ProblemSettings,
     algorithm_settings: &AlgorithmSettings,
-) -> Solution {
-    // population as a vector of solutions.
-    let mut population: Vec<Solution> = Vec::new();
+) -> Individual {
+    // population as a vector of individuals.
+    let mut population: Vec<Individual> = Vec::new();
 
     // initialize population with random solutions
     for _ in 0..algorithm_settings.population_size {
-        population.push(Solution::new(
+        population.push(Individual::new(
             settings.n_visits as usize,
             settings.n_periods as usize,
             settings.n_groups as usize,
+            settings,
         ));
     }
 
@@ -112,20 +170,35 @@ pub fn evolve_pricing(
 
     // iterate over generations
     for gen in 0..algorithm_settings.num_generations {
-        let mut new_population: Vec<Solution> = Vec::new();
+        let mut offspring: Vec<Individual> = Vec::new();
         let mut gen_best_solution = population[0].clone();
         let mut gen_best_score = 0.0;
 
-        // Open/create CSV file for logging
-
         let mut avg_score = 0.0;
-        for candidate in &population {
-            let score = simulate_revenue(candidate, settings);
-            avg_score += score;
-            if score > gen_best_score {
-                gen_best_score = score;
-                gen_best_solution = candidate.clone();
+
+        // generate offspring
+        for _ in 0..algorithm_settings.lambda {
+            let mut rng = rand::thread_rng();
+            let mut parents = Vec::new();
+
+            // mating selection
+            for _ in 0..algorithm_settings.p {
+                let parent_idx = rng.gen_range(0..algorithm_settings.mu);
+                parents.push(population[parent_idx as usize].clone());
             }
+            let offspring_individual = intermediate_recombination(parents);
+            let mut mutated_offspring = mutate_solution(&offspring_individual, settings);
+            let result: crate::simulation::SimulationResult =
+                simulate_revenue(&mutated_offspring, settings);
+            avg_score += result.revenue;
+
+            mutated_offspring.event_history = result.event_history;
+            mutated_offspring.fitness_score = result.revenue;
+            if result.revenue > gen_best_score {
+                gen_best_score = result.revenue;
+                gen_best_solution = mutated_offspring.clone();
+            }
+            offspring.push(mutated_offspring);
         }
         avg_score /= population.len() as f64;
         // Log generation stats to CSV
@@ -143,11 +216,11 @@ pub fn evolve_pricing(
             best_score = gen_best_score;
             best_solution = gen_best_solution.clone();
         }
-        new_population.push(gen_best_solution.clone());
-        while new_population.len() < algorithm_settings.population_size as usize {
-            new_population.push(mutate_solution(&gen_best_solution, settings));
+        offspring.push(gen_best_solution.clone());
+        while offspring.len() < algorithm_settings.population_size as usize {
+            offspring.push(mutate_solution(&gen_best_solution, settings));
         }
-        population = new_population;
+        population = offspring;
     }
     println!("Best overall revenue found: {}", best_score);
     best_solution
