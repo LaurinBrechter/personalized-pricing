@@ -3,12 +3,18 @@ use std::collections::HashMap;
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
 use rand::Rng;
 
+#[derive(PartialEq)]
+pub enum Selection {
+    Comma,
+    Plus,
+}
+
 pub struct AlgorithmSettings {
     pub num_generations: i32,
-    pub population_size: i32,
     pub lambda: i32, // number of offspring
     pub mu: i32,     // population size
     pub p: i32,      // number of parents participating in recombination
+    pub selection: Selection,
 }
 
 #[derive(Clone, Debug)]
@@ -120,7 +126,7 @@ fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
         }
         prices.insert(g, group_map);
     }
-    for (i) in individuals.iter() {
+    for i in individuals.iter() {
         for (g, group_map) in i.prices.iter() {
             for (w, period_prices) in group_map.iter() {
                 for (t, price) in period_prices.iter().enumerate() {
@@ -144,7 +150,7 @@ pub fn evolve_pricing(
     let mut population: Vec<Individual> = Vec::new();
 
     // initialize population with random solutions
-    for _ in 0..algorithm_settings.population_size {
+    for _ in 0..algorithm_settings.mu {
         population.push(Individual::new(
             settings.n_visits as usize,
             settings.n_periods as usize,
@@ -216,11 +222,27 @@ pub fn evolve_pricing(
             best_score = gen_best_score;
             best_solution = gen_best_solution.clone();
         }
-        offspring.push(gen_best_solution.clone());
-        while offspring.len() < algorithm_settings.population_size as usize {
-            offspring.push(mutate_solution(&gen_best_solution, settings));
+        // offspring.push(gen_best_solution.clone());
+        // while offspring.len() < algorithm_settings.mu as usize {
+        //     offspring.push(mutate_solution(&gen_best_solution, settings));
+        // }
+
+        if algorithm_settings.selection == Selection::Comma {
+            // Sort offspring by fitness score and take the mu best individuals
+            offspring.sort_by(|a, b| b.fitness_score.partial_cmp(&a.fitness_score).unwrap());
+            population = offspring
+                .into_iter()
+                .take(algorithm_settings.mu as usize)
+                .collect();
+        } else if algorithm_settings.selection == Selection::Plus {
+            // Combine population and offspring, sort by fitness, and take mu best
+            population.extend(offspring);
+            population.sort_by(|a, b| b.fitness_score.partial_cmp(&a.fitness_score).unwrap());
+            population = population
+                .into_iter()
+                .take(algorithm_settings.mu as usize)
+                .collect();
         }
-        population = offspring;
     }
     println!("Best overall revenue found: {}", best_score);
     best_solution

@@ -2,7 +2,7 @@ use crate::evolution::Individual;
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
-use rand_distr::{Exp, Normal};
+use rand_distr::{Beta, Exp, Normal};
 use std::cmp::Reverse;
 
 #[derive(Debug, Clone)]
@@ -13,6 +13,7 @@ pub struct Customer<'a> {
     erp: f64,
     rp: f64,
     wtp: f64,
+    max_wtp: f64,
     price_hist: Vec<f64>,
     // visit_hist: Vec<i32>,
     settings: &'a ProblemSettings,
@@ -26,15 +27,7 @@ pub struct SimulationEvent {
 }
 
 impl<'a> Customer<'a> {
-    pub fn new(
-        id: i32,
-        group: i32,
-        wtp_min: f64,
-        wtp_max: f64,
-        settings: &'a ProblemSettings,
-    ) -> Self {
-        let mut rng = rand::thread_rng();
-        let wtp: f64 = rng.gen_range(wtp_min..=wtp_max);
+    pub fn new(id: i32, group: i32, wtp: f64, max_wtp: f64, settings: &'a ProblemSettings) -> Self {
         Customer {
             id,
             group,
@@ -42,6 +35,7 @@ impl<'a> Customer<'a> {
             erp: -1.0,
             rp: -1.0,
             wtp,
+            max_wtp,
             price_hist: vec![],
             // visit_hist: vec![],
             settings,
@@ -138,14 +132,24 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
     let mut rng = rand::thread_rng();
 
     let mut customers: Vec<Customer> = Vec::new();
+
+    let beta_dist = Beta::new(2.0, 5.0).unwrap();
+
     let mut id = 0;
     for i in 0..settings.group_sizes.len() {
         let group_size = settings.group_sizes[i];
         let group_mean = settings.group_means[i];
         for _ in 0..group_size {
             let normal_dist = Normal::new(group_mean * settings.scaling, 5.0).unwrap();
+            let wtp_increase = 1.0 + rng.sample(beta_dist);
             let wtp0: f64 = rng.sample(normal_dist);
-            customers.push(Customer::new(id, i as i32, wtp0, wtp0, settings));
+            customers.push(Customer::new(
+                id,
+                i as i32,
+                wtp0,
+                wtp0 * wtp_increase,
+                settings,
+            ));
             id += 1;
         }
     }
@@ -181,6 +185,14 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
             customers[customer_idx].group as usize,
             event.0.t.0 as usize,
         );
+        if price > customers[customer_idx].max_wtp {
+            event_history.push(SimulationEvent {
+                t: OrderedFloat(event.0.t.0),
+                event: "quit".to_string(),
+                customer: event.0.customer,
+            });
+            continue;
+        }
         if price < customers[customer_idx].wtp {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
