@@ -13,6 +13,7 @@ fn main() {
         scaling: 100.0,
         group_sizes,
         group_means: vec![2.0, 5.0, 1.25],
+        max_events: 1000,
         alpha: 0.88,
         lambda: 2.25,
         eta: 0.0,

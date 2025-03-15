@@ -3,7 +3,7 @@ use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
 use rand_distr::{Beta, Exp, Normal};
-use std::{cmp::Reverse, collections::HashMap};
+use std::cmp::Reverse;
 
 #[derive(Debug, Clone)]
 pub struct Customer<'a> {
@@ -101,6 +101,7 @@ pub struct ProblemSettings {
     pub alpha: f64,
     pub lambda: f64, // loss aversion
     pub eta: f64,    // price sensitivity
+    pub max_events: i32,
 }
 
 pub fn init_simulation(
@@ -168,13 +169,12 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
     let mut revenue = 0.0;
     let mut regret = 0.0;
     let mut n_sold = 0;
-    let max_events = 1000;
     let mut event_count = 0;
     let mut avg_sold_at = 0.0;
 
     let mut event_history: Vec<SimulationEvent> = Vec::new();
 
-    while !event_calendar.is_empty() && event_count < max_events {
+    while !event_calendar.is_empty() && event_count < settings.max_events {
         event_count += 1;
         let event = event_calendar.pop();
         if event.is_none() {

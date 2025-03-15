@@ -26,10 +26,12 @@ pub struct Individual {
     pub prices: HashMap<usize, HashMap<usize, Vec<f64>>>,
     pub event_history: Vec<SimulationEvent>,
     pub fitness_score: f64,
+    pub ind_id: i32,
 }
 
 impl Individual {
     pub fn new(
+        ind_id: i32,
         n_visits: usize,
         n_periods: usize,
         n_groups: usize,
@@ -54,6 +56,7 @@ impl Individual {
             prices,
             event_history: vec![],
             fitness_score: 0.0,
+            ind_id: ind_id,
         };
 
         let result = simulate_revenue(&ind, settings);
@@ -64,6 +67,24 @@ impl Individual {
 
     pub fn get_price(&self, w: usize, g: usize, t: usize) -> f64 {
         self.prices[&g][&w][t]
+    }
+}
+
+fn log_population(
+    writer: &mut csv::Writer<std::fs::File>,
+    population: &Vec<Individual>,
+    generation: i32,
+    type_: &str,
+) {
+    for individual in population.iter() {
+        writer
+            .write_record(&[
+                generation.to_string(),
+                type_.to_string(),
+                individual.ind_id.to_string(),
+                individual.fitness_score.to_string(),
+            ])
+            .unwrap();
     }
 }
 
@@ -91,6 +112,7 @@ fn mutate_solution(individual: &Individual, settings: &AlgorithmSettings) -> Ind
         prices: new_prices,
         event_history: vec![],
         fitness_score: 0.0,
+        ind_id: individual.ind_id,
     }
 }
 
@@ -109,7 +131,7 @@ fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
     new_vector
 }
 
-fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
+fn intermediate_recombination(individuals: Vec<Individual>, ind_id: i32) -> Individual {
     let mut prices = HashMap::new();
     let n_parents = individuals.len() as f64;
 
@@ -142,6 +164,7 @@ fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
         prices,
         event_history: vec![],
         fitness_score: 0.0,
+        ind_id: ind_id,
     }
 }
 
@@ -153,13 +176,18 @@ pub fn evolve_pricing(
     let mut population: Vec<Individual> = Vec::new();
 
     // initialize population with random solutions
+
+    let mut ind_id = 0 as i32;
+
     for _ in 0..algorithm_settings.mu {
         population.push(Individual::new(
+            ind_id,
             settings.n_visits as usize,
             settings.n_periods as usize,
             settings.n_groups as usize,
             settings,
         ));
+        ind_id += 1;
     }
 
     let mut best_solution = population[0].clone();
@@ -178,7 +206,7 @@ pub fn evolve_pricing(
     let mut writer = csv::Writer::from_writer(file);
 
     writer
-        .write_record(&["Generation", "Best Score", "Average Score"])
+        .write_record(&["generation", "type", "individual", "score"])
         .unwrap();
 
     // iterate over generations
@@ -199,30 +227,24 @@ pub fn evolve_pricing(
                 let parent_idx = rng.gen_range(0..algorithm_settings.mu);
                 parents.push(population[parent_idx as usize].clone());
             }
-            let offspring_individual = intermediate_recombination(parents);
+            let offspring_individual = intermediate_recombination(parents, ind_id);
+            ind_id += 1;
             let mut mutated_offspring = mutate_solution(&offspring_individual, algorithm_settings);
-            let result: crate::simulation::SimulationResult =
-                simulate_revenue(&mutated_offspring, settings);
-            avg_score += result.revenue;
+            let simulation_result = simulate_revenue(&mutated_offspring, settings);
+            avg_score += simulation_result.revenue;
 
-            mutated_offspring.event_history = result.event_history;
-            mutated_offspring.fitness_score = result.revenue;
-            if result.revenue > gen_best_score {
-                gen_best_score = result.revenue;
+            mutated_offspring.event_history = simulation_result.event_history;
+            mutated_offspring.fitness_score = simulation_result.revenue;
+            if simulation_result.revenue > gen_best_score {
+                gen_best_score = simulation_result.revenue;
                 gen_best_solution = mutated_offspring.clone();
             }
             offspring.push(mutated_offspring);
         }
-        avg_score /= population.len() as f64;
+        // avg_score /= population.len() as f64;
         // Log generation stats to CSV
-        writer
-            .write_record(&[
-                gen.to_string(),
-                gen_best_score.to_string(),
-                avg_score.to_string(),
-            ])
-            .unwrap();
-        writer.flush().unwrap();
+        log_population(&mut writer, &population, gen, "population");
+        log_population(&mut writer, &offspring, gen, "offspring");
 
         println!("Generation {}: Best revenue = {}", gen, gen_best_score);
         if gen_best_score > best_score {
