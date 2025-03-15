@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::fs;
 
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
 use rand::Rng;
+use rand_distr::Normal;
 
 #[derive(PartialEq)]
 pub enum Selection {
@@ -15,6 +17,8 @@ pub struct AlgorithmSettings {
     pub mu: i32,     // population size
     pub p: i32,      // number of parents participating in recombination
     pub selection: Selection,
+    pub mutation_probability: f64,
+    pub mutation_stddev: f64,
 }
 
 #[derive(Clone, Debug)]
@@ -63,7 +67,7 @@ impl Individual {
     }
 }
 
-fn mutate_solution(individual: &Individual, _settings: &ProblemSettings) -> Individual {
+fn mutate_solution(individual: &Individual, settings: &AlgorithmSettings) -> Individual {
     let mut new_prices = individual.prices.clone();
     let mut rng = rand::thread_rng();
 
@@ -72,14 +76,12 @@ fn mutate_solution(individual: &Individual, _settings: &ProblemSettings) -> Indi
         for period_prices in group_map.values_mut() {
             for price in period_prices.iter_mut() {
                 // mutate with 30% probability
-                if rng.gen_bool(0.3) {
-                    let mutation: f64 = rng.gen_range(-5.0..5.0);
+                if rng.gen_bool(settings.mutation_probability) {
+                    let normal = Normal::new(0.0, settings.mutation_stddev).unwrap();
+                    let mutation = rng.sample(normal);
                     *price += mutation;
                     if *price < 0.0 {
                         *price = 0.0;
-                    }
-                    if *price > 100.0 {
-                        *price = 100.0;
                     }
                 }
             }
@@ -109,6 +111,7 @@ fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
 
 fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
     let mut prices = HashMap::new();
+    let n_parents = individuals.len() as f64;
 
     let n_groups = individuals[0].prices.len();
     let n_visits = individuals[0].prices[&0].len();
@@ -130,7 +133,7 @@ fn intermediate_recombination(individuals: Vec<Individual>) -> Individual {
         for (g, group_map) in i.prices.iter() {
             for (w, period_prices) in group_map.iter() {
                 for (t, price) in period_prices.iter().enumerate() {
-                    prices.get_mut(g).unwrap().get_mut(w).unwrap()[t] += price;
+                    prices.get_mut(g).unwrap().get_mut(w).unwrap()[t] += price / n_parents;
                 }
             }
         }
@@ -162,11 +165,15 @@ pub fn evolve_pricing(
     let mut best_solution = population[0].clone();
     let mut best_score = 0.0;
 
+    fs::remove_file("./results/evolution_log.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
-        .open("evolution_log.csv")
+        .open("./results/evolution_log.csv")
         .unwrap();
     let mut writer = csv::Writer::from_writer(file);
 
@@ -193,7 +200,7 @@ pub fn evolve_pricing(
                 parents.push(population[parent_idx as usize].clone());
             }
             let offspring_individual = intermediate_recombination(parents);
-            let mut mutated_offspring = mutate_solution(&offspring_individual, settings);
+            let mut mutated_offspring = mutate_solution(&offspring_individual, algorithm_settings);
             let result: crate::simulation::SimulationResult =
                 simulate_revenue(&mutated_offspring, settings);
             avg_score += result.revenue;

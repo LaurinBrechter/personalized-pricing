@@ -3,7 +3,7 @@ use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
 use rand_distr::{Beta, Exp, Normal};
-use std::cmp::Reverse;
+use std::{cmp::Reverse, collections::HashMap};
 
 #[derive(Debug, Clone)]
 pub struct Customer<'a> {
@@ -24,6 +24,10 @@ pub struct SimulationEvent {
     pub t: OrderedFloat<f32>,
     pub event: String,
     pub customer: i32,
+    pub customer_wtp: i32,
+    pub customer_max_wtp: i32,
+    pub group: i32,
+    pub price: i32,
 }
 
 impl<'a> Customer<'a> {
@@ -112,6 +116,10 @@ pub fn init_simulation(
             t: OrderedFloat(customer.next_visit(&mut rng, 0.0)),
             event: "customer_arrival".to_string(),
             customer: customer.id,
+            customer_wtp: customer.wtp as i32,
+            customer_max_wtp: customer.max_wtp as i32,
+            group: customer.group,
+            price: 0.0 as i32,
         };
         event_calendar.push(event.clone(), Reverse(event.t));
     }
@@ -136,6 +144,7 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
     let beta_dist = Beta::new(2.0, 5.0).unwrap();
 
     let mut id = 0;
+    let mut total_wtp = 0.0;
     for i in 0..settings.group_sizes.len() {
         let group_size = settings.group_sizes[i];
         let group_mean = settings.group_means[i];
@@ -150,6 +159,7 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
                 wtp0 * wtp_increase,
                 settings,
             ));
+            total_wtp += wtp0;
             id += 1;
         }
     }
@@ -181,15 +191,19 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         let next_visit = customers[customer_idx].next_visit(&mut rng, event.0.t.0);
         let visit_index = customers[customer_idx].price_hist.len() as i32;
         let price = individual.get_price(
-            visit_index as usize,
+            0 as usize, // visit_index as usize,
             customers[customer_idx].group as usize,
-            event.0.t.0 as usize,
+            0 as usize, // event.0.t.0 as usize,
         );
         if price > customers[customer_idx].max_wtp {
             event_history.push(SimulationEvent {
                 t: OrderedFloat(event.0.t.0),
                 event: "quit".to_string(),
                 customer: event.0.customer,
+                customer_wtp: event.0.customer_wtp,
+                customer_max_wtp: event.0.customer_max_wtp,
+                group: event.0.group,
+                price: price as i32,
             });
             continue;
         }
@@ -204,12 +218,20 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
                 t: OrderedFloat(event.0.t.0),
                 event: "sold".to_string(),
                 customer: event.0.customer,
+                customer_wtp: event.0.customer_wtp,
+                customer_max_wtp: event.0.customer_max_wtp,
+                group: event.0.group,
+                price: price as i32,
             });
         } else {
             let next_event = SimulationEvent {
                 t: OrderedFloat(next_visit),
                 event: "customer_arrival".to_string(),
                 customer: event.0.customer,
+                customer_wtp: event.0.customer_wtp,
+                customer_max_wtp: event.0.customer_max_wtp,
+                group: event.0.group,
+                price: price as i32,
             };
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }

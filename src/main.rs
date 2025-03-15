@@ -1,3 +1,5 @@
+use std::fs;
+
 use personalized_pricing::evolution::{evolve_pricing, AlgorithmSettings, Selection};
 use personalized_pricing::simulation::ProblemSettings;
 fn main() {
@@ -17,21 +19,41 @@ fn main() {
     };
 
     let algorithm_settings = AlgorithmSettings {
-        num_generations: 100,
+        num_generations: 10,
         lambda: 10,
         mu: 5,
         p: 2,
         selection: Selection::Plus,
+        mutation_probability: 0.5,
+        mutation_stddev: 100.0,
     };
 
     let best_solution = evolve_pricing(&settings, &algorithm_settings);
 
     // Save best solution's prices to CSV
-    let mut writer = csv::Writer::from_path("event_history.csv").unwrap();
+
+    fs::remove_file("./results/event_history.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+
+    let mut writer = csv::Writer::from_path("./results/event_history.csv").unwrap();
 
     // Write header row
-    let header = vec!["t", "event", "customer"];
+    let header = vec![
+        "t",
+        "event",
+        "customer",
+        "customer_wtp",
+        "customer_max_wtp",
+        "group",
+        "price",
+    ];
     writer.write_record(&header).unwrap();
+
+    println!(
+        "Best Solution {:?}",
+        best_solution.get_price(0 as usize, 0 as usize, 0 as usize)
+    );
 
     // Write price data
     for event in best_solution.event_history {
@@ -40,6 +62,10 @@ fn main() {
                 event.t.to_string(),
                 event.event.to_string(),
                 event.customer.to_string(),
+                event.customer_wtp.to_string(),
+                event.customer_max_wtp.to_string(),
+                event.group.to_string(),
+                event.price.to_string(),
             ])
             .unwrap();
     }
