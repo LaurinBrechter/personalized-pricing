@@ -17,6 +17,10 @@ fn main() {
         alpha: 0.88,
         lambda: 2.25,
         eta: 0.0,
+        clustering_accuracy: 0.2,
+        k_neighbors: 6,
+        p_intra: 0.1,
+        p_inter: 0.3,
     };
 
     let algorithm_settings = AlgorithmSettings {
@@ -30,6 +34,34 @@ fn main() {
     };
 
     let best_solution = evolve_pricing(&settings, &algorithm_settings);
+
+    // write price matrix to csv
+
+    fs::remove_file("./results/price_matrix.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+
+    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
+
+    let header = vec!["group", "visit", "t", "price"];
+    writer.write_record(&header).unwrap();
+
+    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
+    for (group, prices) in best_solution.prices {
+        for (visit, prices) in prices {
+            for (t, price) in prices.iter().enumerate() {
+                writer
+                    .write_record(&[
+                        group.to_string(),
+                        visit.to_string(),
+                        t.to_string(),
+                        price.to_string(),
+                    ])
+                    .unwrap();
+            }
+        }
+    }
+    writer.flush().unwrap();
 
     // Save best solution's prices to CSV
 
@@ -54,12 +86,11 @@ fn main() {
     ];
     writer.write_record(&header).unwrap();
 
-    println!(
-        "Best Solution {:?}",
-        best_solution.get_price(0 as usize, 0 as usize, 0 as usize)
-    );
+    // println!(
+    //     "Best Solution {:?}",
+    //     best_solution.get_price(0 as usize, 0 as usize, 0 as usize)
+    // );
 
-    // Write price data
     for event in best_solution.event_history {
         writer
             .write_record(&[

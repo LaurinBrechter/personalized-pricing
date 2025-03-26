@@ -1,4 +1,4 @@
-use crate::evolution::Individual;
+use crate::{evolution::Individual, network_formation::create_network};
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
@@ -7,16 +7,17 @@ use std::cmp::Reverse;
 
 #[derive(Debug, Clone)]
 pub struct Customer<'a> {
-    id: i32,
-    group: i32,
-    irp: f64,
-    erp: f64,
-    rp: f64,
-    wtp: f64,
-    max_wtp: f64,
-    price_hist: Vec<f64>,
-    // visit_hist: Vec<i32>,
+    id: i32,              // unique identifier for the customer
+    group: i32,           // true underlying group to which the customer belongs
+    predicted_group: i32, // group to which the customer is predicted to belong based on clustering
+    irp: f64,             // internal reference price
+    erp: f64,             // external reference price
+    rp: f64,              // reference price
+    wtp: f64,             // willingness to pay
+    max_wtp: f64,         // maximum willingness to pay
+    price_hist: Vec<f64>, // history of prices
     settings: &'a ProblemSettings,
+    neighbors: Vec<i32>, // list of the ids of neighboring customers
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -51,10 +52,19 @@ impl SimulationEvent {
 }
 
 impl<'a> Customer<'a> {
-    pub fn new(id: i32, group: i32, wtp: f64, max_wtp: f64, settings: &'a ProblemSettings) -> Self {
+    pub fn new(
+        id: i32,
+        group: i32,
+        predicted_group: i32,
+        wtp: f64,
+        max_wtp: f64,
+        settings: &'a ProblemSettings,
+        neighbors: Vec<i32>,
+    ) -> Self {
         Customer {
             id,
             group,
+            predicted_group,
             irp: wtp,
             erp: wtp,
             rp: wtp,
@@ -63,6 +73,7 @@ impl<'a> Customer<'a> {
             price_hist: vec![],
             // visit_hist: vec![],
             settings,
+            neighbors,
         }
     }
     // LABEL
@@ -73,15 +84,13 @@ impl<'a> Customer<'a> {
     // TODO: implement aggregation via network.
     // LABEL
     pub fn update_erp(&mut self, other_customers: &Vec<Customer>) {
-        let mut rng = rand::thread_rng();
         let mut ref_prices: Vec<f64> = vec![];
-        for cust in other_customers {
-            if rng.gen::<f64>() < 0.2 {
-                if let Some(&price) = cust.price_hist.last() {
-                    ref_prices.push(price);
-                }
+        for &neighbor_id in &self.neighbors {
+            if let Some(&price) = other_customers[neighbor_id as usize].price_hist.last() {
+                ref_prices.push(price);
             }
         }
+
         // Calculate average of reference prices and update erp
         if !ref_prices.is_empty() {
             let avg_price = ref_prices.iter().sum::<f64>() / ref_prices.len() as f64;
@@ -130,6 +139,10 @@ pub struct ProblemSettings {
     pub lambda: f64, // loss aversion
     pub eta: f64,    // price sensitivity
     pub max_events: i32,
+    pub clustering_accuracy: f64,
+    pub k_neighbors: i32,
+    pub p_intra: f64,
+    pub p_inter: f64,
 }
 
 pub fn init_simulation(
@@ -169,12 +182,14 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
 
     let beta_dist = Beta::new(2.0, 5.0).unwrap();
 
+    let network = create_network(settings);
+
     let mut id = 0;
-    let mut total_wtp = 0.0;
     for i in 0..settings.group_sizes.len() {
         let group_size = settings.group_sizes[i];
         let group_mean = settings.group_means[i];
         for _ in 0..group_size {
+            let neighbors = network[id as usize].clone();
             let normal_dist = Normal::new(
                 group_mean * settings.scaling,
                 (group_mean * settings.scaling * 0.2).powf(0.5),
@@ -182,14 +197,24 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
             .unwrap();
             let wtp_increase = 1.0 + rng.sample(beta_dist);
             let wtp0: f64 = rng.sample(normal_dist);
+
+            // With 20% probability, assign a random group prediction
+            let predicted_group = if rng.gen_bool(settings.clustering_accuracy) {
+                rng.gen_range(0..settings.group_sizes.len())
+            } else {
+                i
+            };
+
             customers.push(Customer::new(
                 id,
                 i as i32,
+                predicted_group as i32,
                 wtp0,
                 wtp0 * wtp_increase,
                 settings,
+                neighbors,
             ));
-            total_wtp += wtp0;
+            // total_wtp += wtp0;
             id += 1;
         }
     }
@@ -220,8 +245,8 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         let next_visit = customers[customer_idx].next_visit(&mut rng, event.0.t.0);
         let visit_index = customers[customer_idx].price_hist.len() as i32;
         let price = individual.get_price(
-            0 as usize, // visit_index as usize,
-            customers[customer_idx].group as usize,
+            visit_index as usize, // visit_index as usize,
+            customers[customer_idx].predicted_group as usize,
             0 as usize, // event.0.t.0 as usize,
         );
         if price > customers[customer_idx].max_wtp {

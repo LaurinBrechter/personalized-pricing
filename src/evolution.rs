@@ -44,7 +44,8 @@ impl Individual {
             let mut group_map = HashMap::new();
             for w in 0..n_visits {
                 let mut period_prices = Vec::new();
-                for _ in 0..n_periods {
+                // TODO: change back
+                for _ in 0..1 {
                     period_prices.push(rng.gen_range(0.0..100.0));
                 }
                 group_map.insert(w, period_prices);
