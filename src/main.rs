@@ -20,11 +20,11 @@ fn main() {
     };
 
     let algorithm_settings = AlgorithmSettings {
-        num_generations: 10,
+        num_generations: 20,
         lambda: 10,
         mu: 5,
         p: 2,
-        selection: Selection::Plus,
+        selection: Selection::Comma,
         mutation_probability: 0.5,
         mutation_stddev: 100.0,
     };
@@ -48,6 +48,9 @@ fn main() {
         "customer_max_wtp",
         "group",
         "price",
+        "irp",
+        "erp",
+        "rp",
     ];
     writer.write_record(&header).unwrap();
 
@@ -67,6 +70,9 @@ fn main() {
                 event.customer_max_wtp.to_string(),
                 event.group.to_string(),
                 event.price.to_string(),
+                event.irp.to_string(),
+                event.erp.to_string(),
+                event.rp.to_string(),
             ])
             .unwrap();
     }

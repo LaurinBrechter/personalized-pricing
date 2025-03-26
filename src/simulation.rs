@@ -28,6 +28,26 @@ pub struct SimulationEvent {
     pub customer_max_wtp: i32,
     pub group: i32,
     pub price: i32,
+    pub irp: i32,
+    pub erp: i32,
+    pub rp: i32,
+}
+
+impl SimulationEvent {
+    pub fn new(customer: &Customer, t: OrderedFloat<f32>, event: String, price: f64) -> Self {
+        SimulationEvent {
+            t,
+            event,
+            customer: customer.id,
+            customer_wtp: customer.wtp as i32,
+            customer_max_wtp: customer.max_wtp as i32,
+            irp: customer.irp as i32,
+            erp: customer.erp as i32,
+            rp: customer.rp as i32,
+            group: customer.group,
+            price: price as i32,
+        }
+    }
 }
 
 impl<'a> Customer<'a> {
@@ -35,9 +55,9 @@ impl<'a> Customer<'a> {
         Customer {
             id,
             group,
-            irp: -1.0,
-            erp: -1.0,
-            rp: -1.0,
+            irp: wtp,
+            erp: wtp,
+            rp: wtp,
             wtp,
             max_wtp,
             price_hist: vec![],
@@ -61,6 +81,14 @@ impl<'a> Customer<'a> {
                     ref_prices.push(price);
                 }
             }
+        }
+        // Calculate average of reference prices and update erp
+        if !ref_prices.is_empty() {
+            let avg_price = ref_prices.iter().sum::<f64>() / ref_prices.len() as f64;
+            self.erp = avg_price;
+        } else if self.erp < 0.0 {
+            // Initialize erp if it hasn't been set yet
+            self.erp = self.wtp;
         }
     }
     // LABEL
@@ -113,15 +141,12 @@ pub fn init_simulation(
         PriorityQueue::new();
 
     for customer in customers {
-        let event = SimulationEvent {
-            t: OrderedFloat(customer.next_visit(&mut rng, 0.0)),
-            event: "customer_arrival".to_string(),
-            customer: customer.id,
-            customer_wtp: customer.wtp as i32,
-            customer_max_wtp: customer.max_wtp as i32,
-            group: customer.group,
-            price: 0.0 as i32,
-        };
+        let event = SimulationEvent::new(
+            customer,
+            OrderedFloat(customer.next_visit(&mut rng, 0.0)),
+            "customer_arrival".to_string(),
+            0.0,
+        );
         event_calendar.push(event.clone(), Reverse(event.t));
     }
 
@@ -150,7 +175,11 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         let group_size = settings.group_sizes[i];
         let group_mean = settings.group_means[i];
         for _ in 0..group_size {
-            let normal_dist = Normal::new(group_mean * settings.scaling, 5.0).unwrap();
+            let normal_dist = Normal::new(
+                group_mean * settings.scaling,
+                (group_mean * settings.scaling * 0.2).powf(0.5),
+            )
+            .unwrap();
             let wtp_increase = 1.0 + rng.sample(beta_dist);
             let wtp0: f64 = rng.sample(normal_dist);
             customers.push(Customer::new(
@@ -196,43 +225,37 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
             0 as usize, // event.0.t.0 as usize,
         );
         if price > customers[customer_idx].max_wtp {
-            event_history.push(SimulationEvent {
-                t: OrderedFloat(event.0.t.0),
-                event: "quit".to_string(),
-                customer: event.0.customer,
-                customer_wtp: event.0.customer_wtp,
-                customer_max_wtp: event.0.customer_max_wtp,
-                group: event.0.group,
-                price: price as i32,
-            });
+            event_history.push(SimulationEvent::new(
+                &customers[customer_idx],
+                event.0.t,
+                "quit".to_string(),
+                price,
+            ));
             continue;
         }
-        if price < customers[customer_idx].wtp {
+        let price_diff_pct = (customers[customer_idx].wtp - price) / customers[customer_idx].wtp;
+        let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * 10.0).exp());
+
+        if rng.gen::<f64>() < purchase_prob {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
             regret += customers[customer_idx].wtp - price;
             n_sold += 1;
             avg_sold_at += event.0.t.0;
 
-            event_history.push(SimulationEvent {
-                t: OrderedFloat(event.0.t.0),
-                event: "sold".to_string(),
-                customer: event.0.customer,
-                customer_wtp: event.0.customer_wtp,
-                customer_max_wtp: event.0.customer_max_wtp,
-                group: event.0.group,
-                price: price as i32,
-            });
+            event_history.push(SimulationEvent::new(
+                &customers[customer_idx],
+                event.0.t,
+                "sold".to_string(),
+                price,
+            ));
         } else {
-            let next_event = SimulationEvent {
-                t: OrderedFloat(next_visit),
-                event: "customer_arrival".to_string(),
-                customer: event.0.customer,
-                customer_wtp: event.0.customer_wtp,
-                customer_max_wtp: event.0.customer_max_wtp,
-                group: event.0.group,
-                price: price as i32,
-            };
+            let next_event = SimulationEvent::new(
+                &customers[customer_idx],
+                OrderedFloat(next_visit),
+                "customer_arrival".to_string(),
+                price,
+            );
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }
         let customers_copy = customers.to_vec();
