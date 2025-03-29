@@ -1,7 +1,7 @@
-use std::fs;
-
 use personalized_pricing::evolution::{evolve_pricing, AlgorithmSettings, Selection};
+use personalized_pricing::logging::{init_log_evolution, log_event_history, log_price_matrix};
 use personalized_pricing::simulation::ProblemSettings;
+use std::fs;
 fn main() {
     let group_sizes = vec![20, 10, 30];
     let settings = ProblemSettings {
@@ -23,7 +23,7 @@ fn main() {
         p_inter: 0.3,
     };
 
-    let algorithm_settings = AlgorithmSettings {
+    let mut algorithm_settings = AlgorithmSettings {
         num_generations: 20,
         lambda: 10,
         mu: 5,
@@ -33,79 +33,15 @@ fn main() {
         mutation_stddev: 100.0,
     };
 
-    let best_solution = evolve_pricing(&settings, &algorithm_settings);
+    let mut writer = init_log_evolution();
+
+    let best_solution = evolve_pricing(&settings, &algorithm_settings, &mut writer);
+    algorithm_settings.selection = Selection::Plus;
+    let best_solution_plus = evolve_pricing(&settings, &algorithm_settings, &mut writer);
 
     // write price matrix to csv
 
-    fs::remove_file("./results/price_matrix.csv").unwrap_or_else(|e| {
-        println!("Error removing file: {}", e);
-    });
-
-    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
-
-    let header = vec!["group", "visit", "t", "price"];
-    writer.write_record(&header).unwrap();
-
-    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
-    for (group, prices) in best_solution.prices {
-        for (visit, prices) in prices {
-            for (t, price) in prices.iter().enumerate() {
-                writer
-                    .write_record(&[
-                        group.to_string(),
-                        visit.to_string(),
-                        t.to_string(),
-                        price.to_string(),
-                    ])
-                    .unwrap();
-            }
-        }
-    }
-    writer.flush().unwrap();
-
+    log_price_matrix(&best_solution);
+    log_event_history(&best_solution);
     // Save best solution's prices to CSV
-
-    fs::remove_file("./results/event_history.csv").unwrap_or_else(|e| {
-        println!("Error removing file: {}", e);
-    });
-
-    let mut writer = csv::Writer::from_path("./results/event_history.csv").unwrap();
-
-    // Write header row
-    let header = vec![
-        "t",
-        "event",
-        "customer",
-        "customer_wtp",
-        "customer_max_wtp",
-        "group",
-        "price",
-        "irp",
-        "erp",
-        "rp",
-    ];
-    writer.write_record(&header).unwrap();
-
-    // println!(
-    //     "Best Solution {:?}",
-    //     best_solution.get_price(0 as usize, 0 as usize, 0 as usize)
-    // );
-
-    for event in best_solution.event_history {
-        writer
-            .write_record(&[
-                event.t.to_string(),
-                event.event.to_string(),
-                event.customer.to_string(),
-                event.customer_wtp.to_string(),
-                event.customer_max_wtp.to_string(),
-                event.group.to_string(),
-                event.price.to_string(),
-                event.irp.to_string(),
-                event.erp.to_string(),
-                event.rp.to_string(),
-            ])
-            .unwrap();
-    }
-    writer.flush().unwrap();
 }

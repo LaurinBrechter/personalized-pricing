@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::fs;
+use std::{collections::HashMap, fs::File};
 
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
 use rand::Rng;
@@ -76,6 +75,7 @@ fn log_population(
     population: &Vec<Individual>,
     generation: i32,
     type_: &str,
+    algorithm_settings: &AlgorithmSettings,
 ) {
     for individual in population.iter() {
         writer
@@ -84,6 +84,17 @@ fn log_population(
                 type_.to_string(),
                 individual.ind_id.to_string(),
                 individual.fitness_score.to_string(),
+                algorithm_settings.lambda.to_string(),
+                algorithm_settings.mu.to_string(),
+                algorithm_settings.p.to_string(),
+                (if algorithm_settings.selection == Selection::Comma {
+                    "comma"
+                } else {
+                    "plus"
+                })
+                .to_string(),
+                algorithm_settings.mutation_probability.to_string(),
+                algorithm_settings.mutation_stddev.to_string(),
             ])
             .unwrap();
     }
@@ -165,13 +176,14 @@ fn intermediate_recombination(individuals: Vec<Individual>, ind_id: i32) -> Indi
         prices,
         event_history: vec![],
         fitness_score: 0.0,
-        ind_id: ind_id,
+        ind_id,
     }
 }
 
 pub fn evolve_pricing(
     settings: &ProblemSettings,
     algorithm_settings: &AlgorithmSettings,
+    mut writer: &mut csv::Writer<File>,
 ) -> Individual {
     // population as a vector of individuals.
     let mut population: Vec<Individual> = Vec::new();
@@ -193,22 +205,6 @@ pub fn evolve_pricing(
 
     let mut best_solution = population[0].clone();
     let mut best_score = 0.0;
-
-    fs::remove_file("./results/evolution_log.csv").unwrap_or_else(|e| {
-        println!("Error removing file: {}", e);
-    });
-
-    let file = std::fs::OpenOptions::new()
-        .write(true)
-        .create(true)
-        .append(true)
-        .open("./results/evolution_log.csv")
-        .unwrap();
-    let mut writer = csv::Writer::from_writer(file);
-
-    writer
-        .write_record(&["generation", "type", "individual", "score"])
-        .unwrap();
 
     // iterate over generations
     for gen in 0..algorithm_settings.num_generations {
@@ -244,8 +240,20 @@ pub fn evolve_pricing(
         }
         // avg_score /= population.len() as f64;
         // Log generation stats to CSV
-        log_population(&mut writer, &population, gen, "population");
-        log_population(&mut writer, &offspring, gen, "offspring");
+        log_population(
+            &mut writer,
+            &population,
+            gen,
+            "population",
+            algorithm_settings,
+        );
+        log_population(
+            &mut writer,
+            &offspring,
+            gen,
+            "offspring",
+            algorithm_settings,
+        );
 
         println!("Generation {}: Best revenue = {}", gen, gen_best_score);
         if gen_best_score > best_score {
