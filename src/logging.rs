@@ -97,3 +97,28 @@ pub fn init_log_evolution() -> csv::Writer<File> {
         .unwrap();
     return writer;
 }
+
+pub fn init_log_pso() -> csv::Writer<File> {
+    fs::remove_file("./results/pso_log.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("./results/pso_log.csv")
+        .unwrap();
+    let mut writer = csv::Writer::from_writer(file);
+    writer
+        .write_record(&[
+            "particle_id",
+            "current_fitness",
+            "best_fitness",
+            "swarm_size",
+            "inertia_weight",
+            "cognitive_coefficient",
+            "social_coefficient",
+        ])
+        .unwrap();
+    return writer;
+}
