@@ -18,6 +18,7 @@ pub struct Customer<'a> {
     price_hist: Vec<f64>, // history of prices
     settings: &'a ProblemSettings,
     neighbors: Vec<i32>, // list of the ids of neighboring customers
+    initial_wtp: f64,
 }
 
 #[derive(Debug, Hash, Eq, PartialEq, Clone)]
@@ -74,6 +75,7 @@ impl<'a> Customer<'a> {
             // visit_hist: vec![],
             settings,
             neighbors,
+            initial_wtp: wtp,
         }
     }
     // LABEL
@@ -172,6 +174,7 @@ pub struct SimulationResult {
     pub avg_sold_at: f32,
     pub event_history: Vec<SimulationEvent>,
     pub revenue: f64,
+    pub avg_regret: f64,
 }
 
 // do one simulation run
@@ -250,6 +253,7 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
             0 as usize, // event.0.t.0 as usize,
         );
         if price > customers[customer_idx].max_wtp {
+            regret += customers[customer_idx].max_wtp;
             event_history.push(SimulationEvent::new(
                 &customers[customer_idx],
                 event.0.t,
@@ -264,7 +268,7 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         if rng.gen::<f64>() < purchase_prob {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
-            regret += customers[customer_idx].wtp - price;
+            regret += customers[customer_idx].max_wtp - price;
             n_sold += 1;
             avg_sold_at += event.0.t.0;
 
@@ -292,6 +296,7 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
 
     return SimulationResult {
         regret,
+        avg_regret: regret / customers.len() as f64,
         n_sold: n_sold as f64 / customers.len() as f64,
         avg_sold_at: avg_sold_at / n_sold as f32,
         event_history,

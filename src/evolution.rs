@@ -4,12 +4,19 @@ use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
 use rand::Rng;
 use rand_distr::Normal;
 
-#[derive(PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Selection {
     Comma,
     Plus,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum Adaptation {
+    RechenbergRule,
+    None,
+}
+
+#[derive(Clone, Debug)]
 pub struct AlgorithmSettings {
     pub num_generations: i32,
     pub lambda: i32, // number of offspring
@@ -17,7 +24,9 @@ pub struct AlgorithmSettings {
     pub p: i32,      // number of parents participating in recombination
     pub selection: Selection,
     pub mutation_probability: f64,
-    pub mutation_stddev: f64,
+    pub mutation_strength: f64,
+    pub adaptation: Adaptation,
+    pub rechenberg_window: i32,
 }
 
 #[derive(Clone, Debug)]
@@ -26,6 +35,8 @@ pub struct Individual {
     pub event_history: Vec<SimulationEvent>,
     pub fitness_score: f64,
     pub ind_id: i32,
+    pub avg_regret: f64,
+    pub regret: f64,
 }
 
 impl Individual {
@@ -56,12 +67,16 @@ impl Individual {
             prices,
             event_history: vec![],
             fitness_score: 0.0,
+            avg_regret: 0.0,
+            regret: 0.0,
             ind_id: ind_id,
         };
 
         let result = simulate_revenue(&ind, settings);
         ind.event_history = result.event_history;
         ind.fitness_score = result.revenue;
+        ind.avg_regret = result.avg_regret;
+        ind.regret = result.regret;
         ind
     }
 
@@ -76,14 +91,20 @@ fn log_population(
     generation: i32,
     type_: &str,
     algorithm_settings: &AlgorithmSettings,
+    n_evals: i32,
+    run_id: i32,
 ) {
     for individual in population.iter() {
         writer
             .write_record(&[
+                run_id.to_string(),
                 generation.to_string(),
+                n_evals.to_string(),
                 type_.to_string(),
                 individual.ind_id.to_string(),
                 individual.fitness_score.to_string(),
+                individual.avg_regret.to_string(),
+                individual.regret.to_string(),
                 algorithm_settings.lambda.to_string(),
                 algorithm_settings.mu.to_string(),
                 algorithm_settings.p.to_string(),
@@ -94,7 +115,13 @@ fn log_population(
                 })
                 .to_string(),
                 algorithm_settings.mutation_probability.to_string(),
-                algorithm_settings.mutation_stddev.to_string(),
+                algorithm_settings.mutation_strength.to_string(),
+                (if algorithm_settings.adaptation == Adaptation::RechenbergRule {
+                    "rechenberg"
+                } else {
+                    "none"
+                })
+                .to_string(),
             ])
             .unwrap();
     }
@@ -110,8 +137,8 @@ fn mutate_solution(individual: &Individual, settings: &AlgorithmSettings) -> Ind
             for price in period_prices.iter_mut() {
                 // mutate with 30% probability
                 if rng.gen_bool(settings.mutation_probability) {
-                    let normal = Normal::new(0.0, settings.mutation_stddev).unwrap();
-                    let mutation = rng.sample(normal);
+                    let normal = Normal::new(0.0, 1.0).unwrap();
+                    let mutation = settings.mutation_strength * rng.sample(normal);
                     *price += mutation;
                     if *price < 0.0 {
                         *price = 0.0;
@@ -124,6 +151,8 @@ fn mutate_solution(individual: &Individual, settings: &AlgorithmSettings) -> Ind
         prices: new_prices,
         event_history: vec![],
         fitness_score: 0.0,
+        avg_regret: 0.0,
+        regret: 0.0,
         ind_id: individual.ind_id,
     }
 }
@@ -177,22 +206,29 @@ fn intermediate_recombination(individuals: Vec<Individual>, ind_id: i32) -> Indi
         event_history: vec![],
         fitness_score: 0.0,
         ind_id,
+        avg_regret: 0.0,
+        regret: 0.0,
     }
 }
 
 pub fn evolve_pricing(
+    run_id: i32,
     settings: &ProblemSettings,
     algorithm_settings: &AlgorithmSettings,
     mut writer: &mut csv::Writer<File>,
 ) -> Individual {
     // population as a vector of individuals.
     let mut population: Vec<Individual> = Vec::new();
+    let mut n_evals = 0;
+
+    let mut params = algorithm_settings.clone();
 
     // initialize population with random solutions
 
     let mut ind_id = 0 as i32;
 
     for _ in 0..algorithm_settings.mu {
+        n_evals += 1;
         population.push(Individual::new(
             ind_id,
             settings.n_visits as usize,
@@ -204,7 +240,15 @@ pub fn evolve_pricing(
     }
 
     let mut best_solution = population[0].clone();
-    let mut best_score = 0.0;
+    let mut best_score = population
+        .iter()
+        .map(|ind| ind.fitness_score)
+        .fold(f64::NEG_INFINITY, f64::max);
+
+    let mut success_count = 0;
+    let mut prev_best_score = f64::NEG_INFINITY;
+
+    // println!("Initial best score: {}", best_score);
 
     // iterate over generations
     for gen in 0..algorithm_settings.num_generations {
@@ -226,12 +270,17 @@ pub fn evolve_pricing(
             }
             let offspring_individual = intermediate_recombination(parents, ind_id);
             ind_id += 1;
-            let mut mutated_offspring = mutate_solution(&offspring_individual, algorithm_settings);
+            let mut mutated_offspring = mutate_solution(&offspring_individual, &params);
+
+            n_evals += 1;
             let simulation_result = simulate_revenue(&mutated_offspring, settings);
             avg_score += simulation_result.revenue;
 
             mutated_offspring.event_history = simulation_result.event_history;
             mutated_offspring.fitness_score = simulation_result.revenue;
+            mutated_offspring.avg_regret = simulation_result.avg_regret;
+            mutated_offspring.regret = simulation_result.regret;
+
             if simulation_result.revenue > gen_best_score {
                 gen_best_score = simulation_result.revenue;
                 gen_best_solution = mutated_offspring.clone();
@@ -245,18 +294,26 @@ pub fn evolve_pricing(
             &population,
             gen,
             "population",
-            algorithm_settings,
+            &params,
+            n_evals,
+            run_id,
         );
         log_population(
             &mut writer,
             &offspring,
             gen,
             "offspring",
-            algorithm_settings,
+            &params,
+            n_evals,
+            run_id,
         );
 
-        println!("Generation {}: Best revenue = {}", gen, gen_best_score);
+        // println!(
+        //     "Generation {}: Best revenue (generation) = {}, best revenue (overall) = {}",
+        //     gen, gen_best_score, best_score
+        // );
         if gen_best_score > best_score {
+            success_count += 1;
             best_score = gen_best_score;
             best_solution = gen_best_solution.clone();
         }
@@ -264,6 +321,31 @@ pub fn evolve_pricing(
         // while offspring.len() < algorithm_settings.mu as usize {
         //     offspring.push(mutate_solution(&gen_best_solution, settings));
         // }
+
+        // Apply Rechenberg's rule
+        if algorithm_settings.adaptation == Adaptation::RechenbergRule {
+            if gen_best_score > prev_best_score {}
+
+            // Check if we should adjust mutation strength
+            if gen % algorithm_settings.rechenberg_window == 0 && gen > 0 {
+                let success_rate =
+                    success_count as f64 / algorithm_settings.rechenberg_window as f64;
+
+                // println!("Success rate: {}", success_rate);
+
+                params.mutation_strength = if success_rate > 0.2 {
+                    params.mutation_strength * 1.22
+                } else if success_rate < 0.2 {
+                    params.mutation_strength * 0.82
+                } else {
+                    params.mutation_strength
+                };
+
+                // Reset counter for next window
+                success_count = 0;
+            }
+            prev_best_score = gen_best_score;
+        }
 
         if algorithm_settings.selection == Selection::Comma {
             // Sort offspring by fitness score and take the mu best individuals

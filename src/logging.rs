@@ -11,10 +11,11 @@ pub fn log_price_matrix(best_solution: &Individual) {
     let header = vec!["group", "visit", "t", "price"];
     writer.write_record(&header).unwrap();
 
-    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
+    println!("{:?}", best_solution.prices);
     for (group, prices) in best_solution.prices.iter() {
         for (visit, prices) in prices {
             for (t, price) in prices.iter().enumerate() {
+                println!("{}", price);
                 writer
                     .write_record(&[
                         group.to_string(),
@@ -83,16 +84,21 @@ pub fn init_log_evolution() -> csv::Writer<File> {
     let mut writer = csv::Writer::from_writer(file);
     writer
         .write_record(&[
+            "run_id",
             "generation",
+            "n_evals",
             "type",
             "individual",
             "score",
+            "avg_regret",
+            "regret",
             "lambda",
             "mu",
             "p",
             "selection",
             "mutation_probability",
-            "mutation_stddev",
+            "mutation_strength",
+            "mutation_strat",
         ])
         .unwrap();
     return writer;
@@ -111,6 +117,7 @@ pub fn init_log_pso() -> csv::Writer<File> {
     let mut writer = csv::Writer::from_writer(file);
     writer
         .write_record(&[
+            "run_id",
             "particle_id",
             "current_fitness",
             "best_fitness",

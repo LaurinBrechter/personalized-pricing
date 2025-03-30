@@ -76,6 +76,8 @@ impl Particle {
             event_history: self.event_history.clone(),
             fitness_score: self.current_fitness,
             ind_id: self.particle_id,
+            avg_regret: 0.0,
+            regret: 0.0,
         }
     }
 
@@ -206,5 +208,7 @@ pub fn optimize_pricing(
         event_history: vec![],
         fitness_score: global_best_fitness,
         ind_id: -1,
+        avg_regret: 0.0,
+        regret: 0.0,
     }
 }
