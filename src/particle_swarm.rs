@@ -1,5 +1,5 @@
-use crate::evolution::Individual;
-use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent};
+use crate::evolution::{Individual, PriceMatrix};
+use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent, SimulationResult};
 use rand::Rng;
 use std::{collections::HashMap, fs::File};
 pub struct PSOSettings {
@@ -9,12 +9,13 @@ pub struct PSOSettings {
     pub cognitive_coefficient: f64, // c1
     pub social_coefficient: f64,    // c2
 }
+use crate::mab::Algorithm;
 
 #[derive(Clone, Debug)]
 struct Particle {
-    position: HashMap<usize, HashMap<usize, Vec<f64>>>, // Same structure as Individual's prices
-    velocity: HashMap<usize, HashMap<usize, Vec<f64>>>,
-    best_position: HashMap<usize, HashMap<usize, Vec<f64>>>,
+    position: PriceMatrix, // Same structure as Individual's prices
+    velocity: PriceMatrix,
+    best_position: PriceMatrix,
     current_fitness: f64,
     best_fitness: f64,
     particle_id: i32,
@@ -52,9 +53,9 @@ impl Particle {
         }
 
         let mut particle = Self {
-            position: position.clone(),
-            velocity,
-            best_position: position,
+            position: PriceMatrix(position.clone()),
+            velocity: PriceMatrix(velocity.clone()),
+            best_position: PriceMatrix(position.clone()),
             current_fitness: 0.0,
             best_fitness: 0.0,
             particle_id,
@@ -62,7 +63,7 @@ impl Particle {
         };
 
         // Evaluate initial position
-        let result = simulate_revenue(&particle.to_individual(), settings);
+        let result = simulate_revenue(&mut particle, settings);
         particle.current_fitness = result.revenue;
         particle.best_fitness = result.revenue;
         particle.event_history = result.event_history;
@@ -70,25 +71,19 @@ impl Particle {
         particle
     }
 
-    fn to_individual(&self) -> Individual {
+    fn to_individual<'a>(&self, result: SimulationResult<'a>) -> Individual<'a> {
         Individual {
             prices: self.position.clone(),
-            event_history: self.event_history.clone(),
             fitness_score: self.current_fitness,
             ind_id: self.particle_id,
-            avg_regret: 0.0,
-            regret: 0.0,
+            simulation_result: result,
         }
     }
 
-    fn update_velocity(
-        &mut self,
-        global_best: &HashMap<usize, HashMap<usize, Vec<f64>>>,
-        settings: &PSOSettings,
-    ) {
+    fn update_velocity(&mut self, global_best: &PriceMatrix, settings: &PSOSettings) {
         let mut rng = rand::thread_rng();
 
-        for (g, group_map) in self.velocity.iter_mut() {
+        for (g, group_map) in self.velocity.0.iter_mut() {
             for (w, velocities) in group_map.iter_mut() {
                 for t in 0..velocities.len() {
                     let r1 = rng.gen::<f64>();
@@ -97,10 +92,11 @@ impl Particle {
                     velocities[t] = settings.inertia_weight * velocities[t]
                         + settings.cognitive_coefficient
                             * r1
-                            * (self.best_position[g][w][t] - self.position[g][w][t])
+                            * (self.best_position.0[g][w][t] - self.position.0[g][w][t])
                         + settings.social_coefficient
                             * r2
-                            * (global_best[g][w][t] - self.position[g][w][t]);
+                            * (global_best.get_price(*g, *w, t)
+                                - self.position.get_price(*g, *w, t));
 
                     // Limit velocity if needed
                     velocities[t] = velocities[t].clamp(-10.0, 10.0);
@@ -110,15 +106,32 @@ impl Particle {
     }
 
     fn update_position(&mut self) {
-        for (g, group_map) in self.position.iter_mut() {
+        for (g, group_map) in self.position.0.iter_mut() {
             for (w, prices) in group_map.iter_mut() {
                 for t in 0..prices.len() {
-                    prices[t] += self.velocity[g][w][t];
+                    prices[t] += self.velocity.get_price(*g, *w, t);
                     // Ensure prices stay within bounds
                     prices[t] = prices[t].max(0.0);
                 }
             }
         }
+    }
+}
+
+impl Algorithm for Particle {
+    fn get_price(&mut self, group_id: usize, visit: usize, period: usize) -> i32 {
+        self.position.get_price(group_id, visit, period) as i32
+    }
+
+    fn update_average_reward(
+        &mut self,
+        _group_id: usize,
+        _visit: usize,
+        _period: usize,
+        reward: f64,
+        _price: i32,
+    ) {
+        self.current_fitness = reward;
     }
 }
 
@@ -144,11 +157,11 @@ fn log_iteration(
     }
 }
 
-pub fn optimize_pricing(
-    settings: &ProblemSettings,
+pub fn optimize_pricing<'a>(
+    settings: &'a ProblemSettings,
     pso_settings: &PSOSettings,
     mut writer: &mut csv::Writer<File>,
-) -> Individual {
+) -> Individual<'a> {
     let mut particles: Vec<Particle> = Vec::new();
     let mut global_best_position = None;
     let mut global_best_fitness = f64::NEG_INFINITY;
@@ -178,7 +191,7 @@ pub fn optimize_pricing(
             particle.update_position();
 
             // Evaluate new position
-            let result = simulate_revenue(&particle.to_individual(), settings);
+            let result = simulate_revenue(particle, settings);
             particle.current_fitness = result.revenue;
             particle.event_history = result.event_history;
 
@@ -202,13 +215,11 @@ pub fn optimize_pricing(
         );
     }
 
-    // Convert best solution to Individual and return
-    Individual {
-        prices: global_best_position.unwrap(),
-        event_history: vec![],
-        fitness_score: global_best_fitness,
-        ind_id: -1,
-        avg_regret: 0.0,
-        regret: 0.0,
-    }
+    let best_particle = particles
+        .iter_mut()
+        .max_by(|a, b| a.current_fitness.partial_cmp(&b.current_fitness).unwrap())
+        .unwrap();
+
+    let final_result = simulate_revenue(best_particle, settings);
+    best_particle.to_individual(final_result)
 }

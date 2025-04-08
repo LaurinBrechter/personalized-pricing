@@ -1,7 +1,7 @@
 use crate::evolution::Individual;
 use std::fs::{self, File};
 
-pub fn log_price_matrix(best_solution: &Individual) {
+pub fn log_individual(best_solution: &Individual) {
     fs::remove_file("./results/price_matrix.csv").unwrap_or_else(|e| {
         println!("Error removing file: {}", e);
     });
@@ -12,7 +12,7 @@ pub fn log_price_matrix(best_solution: &Individual) {
     writer.write_record(&header).unwrap();
 
     println!("{:?}", best_solution.prices);
-    for (group, prices) in best_solution.prices.iter() {
+    for (group, prices) in best_solution.prices.0.iter() {
         for (visit, prices) in prices {
             for (t, price) in prices.iter().enumerate() {
                 println!("{}", price);
@@ -52,7 +52,7 @@ pub fn log_event_history(best_solution: &Individual) {
     ];
     writer.write_record(&header).unwrap();
 
-    for event in best_solution.event_history.iter() {
+    for event in best_solution.simulation_result.event_history.iter() {
         writer
             .write_record(&[
                 event.t.to_string(),
@@ -126,6 +126,23 @@ pub fn init_log_pso() -> csv::Writer<File> {
             "cognitive_coefficient",
             "social_coefficient",
         ])
+        .unwrap();
+    return writer;
+}
+
+pub fn init_log_mab() -> csv::Writer<File> {
+    fs::remove_file("./results/mab_log.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("./results/mab_log.csv")
+        .unwrap();
+    let mut writer = csv::Writer::from_writer(file);
+    writer
+        .write_record(&["t", "group", "visit", "price", "reward"])
         .unwrap();
     return writer;
 }

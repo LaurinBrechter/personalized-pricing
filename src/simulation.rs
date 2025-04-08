@@ -1,10 +1,11 @@
-use crate::{evolution::Individual, network_formation::create_network};
+use crate::network_formation::create_network;
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
 use rand_distr::{Beta, Exp, Normal};
 use std::cmp::Reverse;
 
+use crate::mab::Algorithm;
 #[derive(Debug, Clone)]
 pub struct Customer<'a> {
     id: i32,              // unique identifier for the customer
@@ -92,6 +93,15 @@ impl<'a> Customer<'a> {
                 ref_prices.push(price);
             }
         }
+        for customer in other_customers {
+            if customer.id == self.id {
+                continue;
+            } else {
+                if rand::thread_rng().gen::<f64>() < self.settings.global_wom_prob {
+                    ref_prices.push(customer.wtp);
+                }
+            }
+        }
 
         // Calculate average of reference prices and update erp
         if !ref_prices.is_empty() {
@@ -121,9 +131,22 @@ impl<'a> Customer<'a> {
     }
 
     // LABEL
-    pub fn next_visit(&self, rng: &mut ThreadRng, t: f32) -> f32 {
-        let distr = Exp::new(0.1).unwrap();
-        return t + rng.sample::<f32, _>(distr);
+    pub fn next_visit(&self, rng: &mut ThreadRng, t: f32, price: f64) -> f32 {
+        // Calculate the relative price difference
+        let price_diff = (self.wtp - price).abs() / self.wtp;
+
+        // Scale the rate parameter: smaller difference → larger rate → shorter intervals
+        // larger difference → smaller rate → longer intervals
+        let base_rate = 0.1;
+        let rate = base_rate * (1.0 / (1.0 + price_diff));
+
+        println!(
+            "rate: {}, wtp: {}, price: {}, price_diff: {}",
+            rate, self.wtp, price, price_diff
+        );
+
+        let distr = Exp::new(rate as f32).unwrap();
+        t + rng.sample::<f32, _>(distr)
     }
 }
 
@@ -145,6 +168,7 @@ pub struct ProblemSettings {
     pub k_neighbors: i32,
     pub p_intra: f64,
     pub p_inter: f64,
+    pub global_wom_prob: f64,
 }
 
 pub fn init_simulation(
@@ -158,7 +182,7 @@ pub fn init_simulation(
     for customer in customers {
         let event = SimulationEvent::new(
             customer,
-            OrderedFloat(customer.next_visit(&mut rng, 0.0)),
+            OrderedFloat(customer.next_visit(&mut rng, 0.0, 0.0)),
             "customer_arrival".to_string(),
             0.0,
         );
@@ -168,17 +192,21 @@ pub fn init_simulation(
     return event_calendar;
 }
 
-pub struct SimulationResult {
+#[derive(Debug, Clone)]
+pub struct SimulationResult<'a> {
     pub regret: f64,
     pub n_sold: f64,
     pub avg_sold_at: f32,
     pub event_history: Vec<SimulationEvent>,
     pub revenue: f64,
     pub avg_regret: f64,
+    pub customers: Vec<Customer<'a>>,
 }
 
-// do one simulation run
-pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> SimulationResult {
+pub fn simulate_revenue<'a>(
+    algorithm: &mut dyn Algorithm,
+    settings: &'a ProblemSettings,
+) -> SimulationResult<'a> {
     let mut rng = rand::thread_rng();
 
     let mut customers: Vec<Customer> = Vec::new();
@@ -245,13 +273,16 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         event_history.push(event.0.clone());
 
         let customer_idx = event.0.customer as usize;
-        let next_visit = customers[customer_idx].next_visit(&mut rng, event.0.t.0);
+
         let visit_index = customers[customer_idx].price_hist.len() as i32;
-        let price = individual.get_price(
-            visit_index as usize, // visit_index as usize,
+        let price = algorithm.get_price(
             customers[customer_idx].predicted_group as usize,
-            0 as usize, // event.0.t.0 as usize,
-        );
+            visit_index as usize,
+            0 as usize,
+        ) as f64;
+        let price_diff_pct = (customers[customer_idx].wtp - price) / customers[customer_idx].wtp;
+        let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * 10.0).exp());
+
         if price > customers[customer_idx].max_wtp {
             regret += customers[customer_idx].max_wtp;
             event_history.push(SimulationEvent::new(
@@ -260,17 +291,29 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
                 "quit".to_string(),
                 price,
             ));
+            algorithm.update_average_reward(
+                customers[customer_idx].predicted_group as usize,
+                visit_index as usize,
+                event.0.t.0 as usize,
+                0.0,
+                0,
+            );
             continue;
-        }
-        let price_diff_pct = (customers[customer_idx].wtp - price) / customers[customer_idx].wtp;
-        let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * 10.0).exp());
-
-        if rng.gen::<f64>() < purchase_prob {
+        } else if rng.gen::<f64>() < purchase_prob {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
             regret += customers[customer_idx].max_wtp - price;
             n_sold += 1;
             avg_sold_at += event.0.t.0;
+
+            // Update the algorithm with the reward (revenue in this case)
+            algorithm.update_average_reward(
+                customers[customer_idx].predicted_group as usize,
+                visit_index as usize,
+                event.0.t.0 as usize,
+                price,
+                price as i32,
+            );
 
             event_history.push(SimulationEvent::new(
                 &customers[customer_idx],
@@ -279,11 +322,20 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
                 price,
             ));
         } else {
+            let next_visit =
+                customers[customer_idx].next_visit(&mut rng, event.0.t.0, event.0.price as f64);
             let next_event = SimulationEvent::new(
                 &customers[customer_idx],
                 OrderedFloat(next_visit),
                 "customer_arrival".to_string(),
                 price,
+            );
+            algorithm.update_average_reward(
+                customers[customer_idx].predicted_group as usize,
+                visit_index as usize,
+                event.0.t.0 as usize,
+                0.0,
+                price as i32,
             );
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }
@@ -301,5 +353,6 @@ pub fn simulate_revenue(individual: &Individual, settings: &ProblemSettings) -> 
         avg_sold_at: avg_sold_at / n_sold as f32,
         event_history,
         revenue,
+        customers,
     };
 }

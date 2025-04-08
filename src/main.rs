@@ -1,10 +1,11 @@
 use personalized_pricing::evolution::Adaptation;
 use personalized_pricing::evolution::{evolve_pricing, AlgorithmSettings, Selection};
 use personalized_pricing::logging::{
-    init_log_evolution, init_log_pso, log_event_history, log_price_matrix,
+    init_log_evolution, init_log_mab, init_log_pso, log_event_history, log_individual,
 };
+use personalized_pricing::mab::MAB;
 use personalized_pricing::particle_swarm::{optimize_pricing, PSOSettings};
-use personalized_pricing::simulation::ProblemSettings;
+use personalized_pricing::simulation::{simulate_revenue, ProblemSettings};
 
 fn main() {
     let group_sizes = vec![20, 10, 30];
@@ -25,6 +26,7 @@ fn main() {
         k_neighbors: 6,
         p_intra: 0.1,
         p_inter: 0.3,
+        global_wom_prob: 0.5,
     };
 
     let mut es_default_settings = AlgorithmSettings {
@@ -57,6 +59,15 @@ fn main() {
         social_coefficient: 1.5,
     };
 
+    // let mut writer = init_log_mab();
+    // let mut mab = MAB::new(settings.n_groups as usize, 0.0, 500.0, 10, 0.5, &mut writer);
+
+    // for _ in 0..10 {
+    //     let result = simulate_revenue(&mut mab, &settings);
+    //     println!("{:?}", result.revenue);
+    //     println!("{:?}", mab.best_reward);
+    // }
+
     // let mut writer = init_log_pso();
     // let best_solution = optimize_pricing(&settings, &pso_settings, &mut writer);
 
@@ -67,7 +78,8 @@ fn main() {
     for run_id in 0..n_runs {
         let best_solution =
             evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
-        log_price_matrix(&best_solution);
+        log_individual(&best_solution);
+        log_event_history(&best_solution);
     }
     // es_steady_state_settings.adaptation = Adaptation::None;
     // for run_id in 0..n_runs {
@@ -78,7 +90,5 @@ fn main() {
     // let best_solution_plus = evolve_pricing(&settings, &es_default_settings, &mut writer);
 
     // write price matrix to csv
-
-    // log_event_history(&best_solution);
     // Save best solution's prices to CSV
 }
