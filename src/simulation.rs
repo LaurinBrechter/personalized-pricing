@@ -131,19 +131,16 @@ impl<'a> Customer<'a> {
     }
 
     // LABEL
+    // TODO: fix
     pub fn next_visit(&self, rng: &mut ThreadRng, t: f32, price: f64) -> f32 {
         // Calculate the relative price difference
-        let price_diff = (self.wtp - price).abs() / self.wtp;
+        let price_diff = (self.wtp - price) / self.wtp;
 
         // Scale the rate parameter: smaller difference → larger rate → shorter intervals
         // larger difference → smaller rate → longer intervals
         let base_rate = 0.1;
-        let rate = base_rate * (1.0 / (1.0 + price_diff));
-
-        println!(
-            "rate: {}, wtp: {}, price: {}, price_diff: {}",
-            rate, self.wtp, price, price_diff
-        );
+        // Ensure rate stays positive by using max() and adding a small constant
+        let rate = (base_rate * (1.0 / (1.0 + price_diff))).max(0.001);
 
         let distr = Exp::new(rate as f32).unwrap();
         t + rng.sample::<f32, _>(distr)
@@ -296,7 +293,7 @@ pub fn simulate_revenue<'a>(
                 visit_index as usize,
                 event.0.t.0 as usize,
                 0.0,
-                0,
+                price as i32,
             );
             continue;
         } else if rng.gen::<f64>() < purchase_prob {

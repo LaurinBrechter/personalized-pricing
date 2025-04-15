@@ -27,6 +27,7 @@ pub struct MAB<'a> {
     arms_per_group: usize,
     action_space: Vec<i32>,
     writer: &'a mut csv::Writer<File>,
+    last_action: String,
 }
 
 impl<'a> MAB<'a> {
@@ -72,11 +73,13 @@ impl<'a> MAB<'a> {
             arms_per_group,
             action_space,
             writer,
+            last_action: "".to_string(),
         }
     }
 
     pub fn random_action(&self) -> i32 {
         let random_offset = rand::thread_rng().gen_range(0..(self.arms_per_group - 1));
+        // println!("random_offset: {}", self.action_space[random_offset]);
         return self.action_space[random_offset];
     }
 }
@@ -99,8 +102,10 @@ impl Algorithm for MAB<'_> {
 
         if rand::thread_rng().gen::<f64>() < self.epsilon {
             price = self.random_action();
+            self.last_action = "random".to_string();
         } else {
             price = self.best_arm[&group_id] as i32;
+            self.last_action = "best".to_string();
         }
         // self.writer
         //     .write_record(&[
@@ -133,6 +138,7 @@ impl Algorithm for MAB<'_> {
                 visit.to_string(),
                 arm_id.to_string(),
                 reward.to_string(),
+                self.last_action.clone(),
             ])
             .unwrap();
 

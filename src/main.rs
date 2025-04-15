@@ -1,7 +1,7 @@
 use personalized_pricing::evolution::Adaptation;
 use personalized_pricing::evolution::{evolve_pricing, AlgorithmSettings, Selection};
 use personalized_pricing::logging::{
-    init_log_evolution, init_log_mab, init_log_pso, log_event_history, log_individual,
+    init_log, init_log_mab, init_log_pso, log_event_history, log_individual,
 };
 use personalized_pricing::mab::MAB;
 use personalized_pricing::particle_swarm::{optimize_pricing, PSOSettings};
@@ -9,7 +9,7 @@ use personalized_pricing::simulation::{simulate_revenue, ProblemSettings};
 
 fn main() {
     let group_sizes = vec![20, 10, 30];
-    let settings = ProblemSettings {
+    let mut settings = ProblemSettings {
         n_customers: group_sizes.iter().sum(),
         n_periods: 100,
         n_groups: 3,
@@ -60,9 +60,16 @@ fn main() {
     };
 
     // let mut writer = init_log_mab();
-    // let mut mab = MAB::new(settings.n_groups as usize, 0.0, 500.0, 10, 0.5, &mut writer);
+    // let mut mab = MAB::new(
+    //     settings.n_groups as usize,
+    //     0.0,
+    //     500.0,
+    //     20,
+    //     0.05,
+    //     &mut writer,
+    // );
 
-    // for _ in 0..10 {
+    // for _ in 0..100 {
     //     let result = simulate_revenue(&mut mab, &settings);
     //     println!("{:?}", result.revenue);
     //     println!("{:?}", mab.best_reward);
@@ -71,15 +78,22 @@ fn main() {
     // let mut writer = init_log_pso();
     // let best_solution = optimize_pricing(&settings, &pso_settings, &mut writer);
 
-    // write price matrix to csv
-    let mut writer = init_log_evolution();
+    // // write price matrix to csv
+    let mut writer = init_log();
     let n_runs = 1;
 
     for run_id in 0..n_runs {
         let best_solution =
             evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
         log_individual(&best_solution);
-        log_event_history(&best_solution);
+        log_event_history(&best_solution, &settings);
+    }
+    settings.lambda = 5.0;
+    for run_id in 0..n_runs {
+        let best_solution =
+            evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
+        log_individual(&best_solution);
+        log_event_history(&best_solution, &settings);
     }
     // es_steady_state_settings.adaptation = Adaptation::None;
     // for run_id in 0..n_runs {
