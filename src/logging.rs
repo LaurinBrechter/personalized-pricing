@@ -1,4 +1,4 @@
-use crate::{evolution::Individual, simulation::ProblemSettings};
+use crate::{evolution::{Adaptation, AlgorithmSettings, Individual, Selection}, simulation::ProblemSettings};
 use std::fs::{self, File};
 
 pub fn log_individual(best_solution: &Individual) {
@@ -7,7 +7,7 @@ pub fn log_individual(best_solution: &Individual) {
     for (group, prices) in best_solution.prices.0.iter() {
         for (visit, prices) in prices {
             for (t, price) in prices.iter().enumerate() {
-                println!("{}", price);
+                // println!("{}", price);
                 writer
                     .write_record(&[
                         group.to_string(),
@@ -22,7 +22,7 @@ pub fn log_individual(best_solution: &Individual) {
     writer.flush().unwrap();
 }
 
-pub fn log_event_history(best_solution: &Individual, settings: &ProblemSettings) {
+pub fn log_event_history(run_id: i32, best_solution: &Individual, settings: &ProblemSettings) {
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -33,6 +33,7 @@ pub fn log_event_history(best_solution: &Individual, settings: &ProblemSettings)
     for event in best_solution.simulation_result.event_history.iter() {
         writer
             .write_record(&[
+                run_id.to_string(),
                 event.t.to_string(),
                 event.event.to_string(),
                 event.customer.to_string(),
@@ -67,6 +68,7 @@ pub fn init_log() -> csv::Writer<File> {
 
     let mut writer = csv::Writer::from_path("./results/event_history.csv").unwrap();
     let header = vec![
+        "run_id",
         "t",
         "event",
         "customer",
@@ -105,6 +107,7 @@ pub fn init_log() -> csv::Writer<File> {
             "mutation_probability",
             "mutation_strength",
             "mutation_strat",
+            "loss_aversion"
         ])
         .unwrap();
     return writer;
@@ -123,7 +126,7 @@ pub fn init_log_pso() -> csv::Writer<File> {
     let mut writer = csv::Writer::from_writer(file);
     writer
         .write_record(&[
-            "run_id",
+            "num_evals",
             "particle_id",
             "current_fitness",
             "best_fitness",
@@ -151,4 +154,50 @@ pub fn init_log_mab() -> csv::Writer<File> {
         .write_record(&["t", "group", "visit", "price", "reward", "last_action"])
         .unwrap();
     return writer;
+}
+
+
+
+pub fn log_population<'a>(
+    writer: &mut csv::Writer<std::fs::File>,
+    population: &Vec<Individual<'a>>,
+    generation: i32,
+    type_: &str,
+    algorithm_settings: &AlgorithmSettings,
+    problem_settings: &ProblemSettings,
+    n_evals: i32,
+    run_id: i32,
+) {
+    for individual in population.iter() {
+        writer
+            .write_record(&[
+                run_id.to_string(),
+                generation.to_string(),
+                n_evals.to_string(),
+                type_.to_string(),
+                individual.ind_id.to_string(),
+                individual.fitness_score.to_string(),
+                individual.simulation_result.avg_regret.to_string(),
+                individual.simulation_result.regret.to_string(),
+                algorithm_settings.lambda.to_string(),
+                algorithm_settings.mu.to_string(),
+                algorithm_settings.p.to_string(),
+                (if algorithm_settings.selection == Selection::Comma {
+                    "comma"
+                } else {
+                    "plus"
+                })
+                .to_string(),
+                algorithm_settings.mutation_probability.to_string(),
+                algorithm_settings.mutation_strength.to_string(),
+                (if algorithm_settings.adaptation == Adaptation::RechenbergRule {
+                    "rechenberg"
+                } else {
+                    "none"
+                })
+                .to_string(),
+                problem_settings.lambda.to_string(),
+            ])
+            .unwrap();
+    }
 }

@@ -5,6 +5,7 @@ use personalized_pricing::logging::{
 };
 use personalized_pricing::mab::MAB;
 use personalized_pricing::particle_swarm::{optimize_pricing, PSOSettings};
+use personalized_pricing::random_search::random_search;
 use personalized_pricing::simulation::{simulate_revenue, ProblemSettings};
 
 fn main() {
@@ -27,6 +28,7 @@ fn main() {
         p_intra: 0.1,
         p_inter: 0.3,
         global_wom_prob: 0.5,
+        max_price: 500.0
     };
 
     let mut es_default_settings = AlgorithmSettings {
@@ -41,7 +43,7 @@ fn main() {
         rechenberg_window: 10,
     };
     let mut es_steady_state_settings = AlgorithmSettings {
-        num_generations: 500,
+        num_generations: 1000,
         lambda: 1,
         mu: 1,
         p: 1,
@@ -52,8 +54,8 @@ fn main() {
         adaptation: Adaptation::RechenbergRule,
     };
     let pso_settings = PSOSettings {
-        num_iterations: 100,
-        swarm_size: 30,
+        num_iterations: 40,
+        swarm_size: 25,
         inertia_weight: 0.7,
         cognitive_coefficient: 1.5,
         social_coefficient: 1.5,
@@ -75,26 +77,36 @@ fn main() {
     //     println!("{:?}", mab.best_reward);
     // }
 
-    // let mut writer = init_log_pso();
-    // let best_solution = optimize_pricing(&settings, &pso_settings, &mut writer);
+    let mut writer = init_log();
+
+    let n_iterations = 1000;
+    let best_solution = random_search(&settings, n_iterations);
 
     // // write price matrix to csv
-    let mut writer = init_log();
     let n_runs = 1;
 
-    for run_id in 0..n_runs {
+    let mut run_id = 0;
+    for _ in 0..n_runs {
         let best_solution =
             evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
         log_individual(&best_solution);
-        log_event_history(&best_solution, &settings);
+        log_event_history(run_id, &best_solution, &settings);
+        run_id += 1;
     }
-    settings.lambda = 5.0;
-    for run_id in 0..n_runs {
-        let best_solution =
-            evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
-        log_individual(&best_solution);
-        log_event_history(&best_solution, &settings);
-    }
+
+    let mut writer = init_log_pso();
+    let best_solution = optimize_pricing(&settings, &pso_settings, &mut writer);
+
+
+
+    // settings.lambda = 5.0;
+    // for _ in 0..n_runs {
+    //     let best_solution =
+    //         evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
+    //     log_individual(&best_solution);
+    //     log_event_history(run_id, &best_solution, &settings);
+    //     run_id += 1;
+    // }
     // es_steady_state_settings.adaptation = Adaptation::None;
     // for run_id in 0..n_runs {
     //     let best_solution =

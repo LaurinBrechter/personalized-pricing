@@ -166,6 +166,7 @@ pub struct ProblemSettings {
     pub p_intra: f64,
     pub p_inter: f64,
     pub global_wom_prob: f64,
+    pub max_price: f64,
 }
 
 pub fn init_simulation(

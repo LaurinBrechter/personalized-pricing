@@ -1,6 +1,7 @@
 use crate::evolution::{Individual, PriceMatrix};
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent, SimulationResult};
 use rand::Rng;
+use core::num;
 use std::{collections::HashMap, fs::File};
 pub struct PSOSettings {
     pub num_iterations: i32,
@@ -42,7 +43,7 @@ impl Particle {
                 let mut period_prices = Vec::new();
                 let mut period_velocities = Vec::new();
                 for _ in 0..n_periods {
-                    period_prices.push(rng.gen_range(0.0..100.0));
+                    period_prices.push(rng.gen_range(0.0..settings.max_price));
                     period_velocities.push(rng.gen_range(-5.0..5.0));
                 }
                 group_map_pos.insert(w, period_prices);
@@ -166,6 +167,8 @@ pub fn optimize_pricing<'a>(
     let mut global_best_position = None;
     let mut global_best_fitness = f64::NEG_INFINITY;
 
+    let mut num_evals = 0;
+
     // Initialize swarm
     for i in 0..pso_settings.swarm_size {
         particles.push(Particle::new(
@@ -181,7 +184,10 @@ pub fn optimize_pricing<'a>(
             global_best_fitness = particles.last().unwrap().current_fitness;
             global_best_position = Some(particles.last().unwrap().position.clone());
         }
+        
+        num_evals += 1;
     }
+
 
     // Main PSO loop
     for iteration in 0..pso_settings.num_iterations {
@@ -207,11 +213,12 @@ pub fn optimize_pricing<'a>(
                 }
             }
         }
+        num_evals += particles.len() as i32;
 
-        log_iteration(&mut writer, &particles, iteration, pso_settings);
+        log_iteration(&mut writer, &particles, num_evals, pso_settings);
         println!(
             "Iteration {}: Best revenue = {}",
-            iteration, global_best_fitness
+            num_evals, global_best_fitness
         );
     }
 

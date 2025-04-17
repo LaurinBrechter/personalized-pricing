@@ -1,5 +1,6 @@
 use std::{collections::HashMap, fs::File};
 
+use crate::logging::log_population;
 use crate::mab::Algorithm;
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent, SimulationResult};
 use rand::Rng;
@@ -113,47 +114,6 @@ impl<'a> Algorithm for Individual<'a> {
     }
 }
 
-fn log_population<'a>(
-    writer: &mut csv::Writer<std::fs::File>,
-    population: &Vec<Individual<'a>>,
-    generation: i32,
-    type_: &str,
-    algorithm_settings: &AlgorithmSettings,
-    n_evals: i32,
-    run_id: i32,
-) {
-    for individual in population.iter() {
-        writer
-            .write_record(&[
-                run_id.to_string(),
-                generation.to_string(),
-                n_evals.to_string(),
-                type_.to_string(),
-                individual.ind_id.to_string(),
-                individual.fitness_score.to_string(),
-                individual.simulation_result.avg_regret.to_string(),
-                individual.simulation_result.regret.to_string(),
-                algorithm_settings.lambda.to_string(),
-                algorithm_settings.mu.to_string(),
-                algorithm_settings.p.to_string(),
-                (if algorithm_settings.selection == Selection::Comma {
-                    "comma"
-                } else {
-                    "plus"
-                })
-                .to_string(),
-                algorithm_settings.mutation_probability.to_string(),
-                algorithm_settings.mutation_strength.to_string(),
-                (if algorithm_settings.adaptation == Adaptation::RechenbergRule {
-                    "rechenberg"
-                } else {
-                    "none"
-                })
-                .to_string(),
-            ])
-            .unwrap();
-    }
-}
 
 fn mutate_solution<'a>(
     individual: &Individual<'a>,
@@ -336,6 +296,7 @@ pub fn evolve_pricing<'a>(
             gen,
             "population",
             &params,
+            &settings,
             n_evals,
             run_id,
         );
@@ -345,6 +306,7 @@ pub fn evolve_pricing<'a>(
             gen,
             "offspring",
             &params,
+            &settings,
             n_evals,
             run_id,
         );
@@ -405,6 +367,6 @@ pub fn evolve_pricing<'a>(
                 .collect();
         }
     }
-    println!("Best overall revenue found: {}", best_score);
+    // println!("Best overall revenue found: {}", best_score);
     best_solution
 }
