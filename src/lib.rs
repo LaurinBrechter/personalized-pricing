@@ -5,3 +5,4 @@ pub mod network_formation;
 pub mod particle_swarm;
 pub mod simulation;
 pub mod random_search;
+pub mod custom;

@@ -39,7 +39,7 @@ impl<'a> RandomSearchIndividual<'a> {
             simulation_result: SimulationResult {
                 regret: 0.0,
                 n_sold: 0.0,
-                avg_sold_at: 0.0,
+                avg_time_sold_at: 0.0,
                 event_history: vec![],
                 revenue: 0.0,
                 avg_regret: 0.0,

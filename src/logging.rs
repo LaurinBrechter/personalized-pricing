@@ -1,8 +1,14 @@
-use crate::{evolution::{Adaptation, AlgorithmSettings, Individual, Selection}, simulation::ProblemSettings};
+use crate::{evolution::{Adaptation, ESSettings, Individual, Selection}, simulation::{ProblemSettings, SimulationResult}};
 use std::fs::{self, File};
 
-pub fn log_individual(best_solution: &Individual) {
-    let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
+pub fn log_individual(run_id: i32, best_solution: &Individual) {
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .append(true)
+        .open("./results/price_matrix.csv")
+        .unwrap();
+    let mut writer = csv::Writer::from_writer(file);
 
     for (group, prices) in best_solution.prices.0.iter() {
         for (visit, prices) in prices {
@@ -10,6 +16,7 @@ pub fn log_individual(best_solution: &Individual) {
                 // println!("{}", price);
                 writer
                     .write_record(&[
+                        run_id.to_string(),
                         group.to_string(),
                         visit.to_string(),
                         t.to_string(),
@@ -22,7 +29,7 @@ pub fn log_individual(best_solution: &Individual) {
     writer.flush().unwrap();
 }
 
-pub fn log_event_history(run_id: i32, best_solution: &Individual, settings: &ProblemSettings) {
+pub fn log_event_history(run_id: i32, simulation_result: &SimulationResult, settings: &ProblemSettings) {
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -30,7 +37,7 @@ pub fn log_event_history(run_id: i32, best_solution: &Individual, settings: &Pro
         .open("./results/event_history.csv")
         .unwrap();
     let mut writer = csv::Writer::from_writer(file);
-    for event in best_solution.simulation_result.event_history.iter() {
+    for event in simulation_result.event_history.iter() {
         writer
             .write_record(&[
                 run_id.to_string(),
@@ -83,12 +90,20 @@ pub fn init_log() -> csv::Writer<File> {
     ];
     writer.write_record(&header).unwrap();
 
+    
+    
+    return writer;
+}
+
+pub fn init_log_es() -> csv::Writer<File> {
+
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
         .open("./results/evolution_log.csv")
         .unwrap();
+
     let mut writer = csv::Writer::from_writer(file);
     writer
         .write_record(&[
@@ -110,8 +125,9 @@ pub fn init_log() -> csv::Writer<File> {
             "loss_aversion"
         ])
         .unwrap();
-    return writer;
+    return writer
 }
+
 
 pub fn init_log_pso() -> csv::Writer<File> {
     fs::remove_file("./results/pso_log.csv").unwrap_or_else(|e| {
@@ -126,6 +142,7 @@ pub fn init_log_pso() -> csv::Writer<File> {
     let mut writer = csv::Writer::from_writer(file);
     writer
         .write_record(&[
+            "run_id",
             "num_evals",
             "particle_id",
             "current_fitness",
@@ -139,21 +156,36 @@ pub fn init_log_pso() -> csv::Writer<File> {
     return writer;
 }
 
-pub fn init_log_mab() -> csv::Writer<File> {
+pub fn init_log_mab() -> (csv::Writer<File>, csv::Writer<File>) {
     fs::remove_file("./results/mab_log.csv").unwrap_or_else(|e| {
         println!("Error removing file: {}", e);
     });
+    fs::remove_file("./results/mab_arms.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+
+    let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .append(true)
+            .open("./results/mab_arms.csv")
+            .unwrap();
+    let mut arms_writer = csv::Writer::from_writer(file);
+    arms_writer
+        .write_record(&["run_id", "t", "group", "best_price"])
+        .unwrap();
+
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
         .append(true)
         .open("./results/mab_log.csv")
         .unwrap();
-    let mut writer = csv::Writer::from_writer(file);
-    writer
-        .write_record(&["t", "group", "visit", "price", "reward", "last_action"])
+    let mut mab_log_writer = csv::Writer::from_writer(file);
+    mab_log_writer
+        .write_record(&["config_id", "run_id", "t", "group", "visit", "price", "reward", "last_action"])
         .unwrap();
-    return writer;
+    return (arms_writer, mab_log_writer);
 }
 
 
@@ -163,7 +195,7 @@ pub fn log_population<'a>(
     population: &Vec<Individual<'a>>,
     generation: i32,
     type_: &str,
-    algorithm_settings: &AlgorithmSettings,
+    algorithm_settings: &ESSettings,
     problem_settings: &ProblemSettings,
     n_evals: i32,
     run_id: i32,

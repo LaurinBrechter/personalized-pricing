@@ -121,7 +121,7 @@ impl Particle {
 
 impl Algorithm for Particle {
     fn get_price(&mut self, group_id: usize, visit: usize, period: usize) -> i32 {
-        self.position.get_price(group_id, visit, period) as i32
+        self.position.get_price(group_id, 0, 0) as i32
     }
 
     fn update_average_reward(
@@ -137,6 +137,7 @@ impl Algorithm for Particle {
 }
 
 fn log_iteration(
+    run_id: i32,
     writer: &mut csv::Writer<File>,
     particles: &Vec<Particle>,
     iteration: i32,
@@ -145,6 +146,7 @@ fn log_iteration(
     for particle in particles {
         writer
             .write_record(&[
+                run_id.to_string(),
                 iteration.to_string(),
                 particle.particle_id.to_string(),
                 particle.current_fitness.to_string(),
@@ -159,6 +161,7 @@ fn log_iteration(
 }
 
 pub fn optimize_pricing<'a>(
+    run_id: i32,
     settings: &'a ProblemSettings,
     pso_settings: &PSOSettings,
     mut writer: &mut csv::Writer<File>,
@@ -215,7 +218,7 @@ pub fn optimize_pricing<'a>(
         }
         num_evals += particles.len() as i32;
 
-        log_iteration(&mut writer, &particles, num_evals, pso_settings);
+        log_iteration(run_id, &mut writer, &particles, num_evals, pso_settings);
         println!(
             "Iteration {}: Best revenue = {}",
             num_evals, global_best_fitness

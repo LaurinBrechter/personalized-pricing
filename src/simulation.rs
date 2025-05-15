@@ -1,4 +1,4 @@
-use crate::network_formation::create_network;
+use crate::{custom, evolution::ESSettings, network_formation::create_network};
 use ordered_float::OrderedFloat;
 use priority_queue::PriorityQueue;
 use rand::{rngs::ThreadRng, Rng};
@@ -81,7 +81,7 @@ impl<'a> Customer<'a> {
     }
     // LABEL
     pub fn update_irp(&mut self, new_price: f64) {
-        self.irp = self.irp + self.settings.tau * (new_price - self.irp)
+        self.irp = self.settings.tau * new_price + self.irp * (1.0 - self.settings.tau)
     }
 
     // TODO: implement aggregation via network.
@@ -167,6 +167,8 @@ pub struct ProblemSettings {
     pub p_inter: f64,
     pub global_wom_prob: f64,
     pub max_price: f64,
+    pub num_predicted_groups: i32,
+    pub sigmoid_scale: f64,
 }
 
 pub fn init_simulation(
@@ -194,7 +196,7 @@ pub fn init_simulation(
 pub struct SimulationResult<'a> {
     pub regret: f64,
     pub n_sold: f64,
-    pub avg_sold_at: f32,
+    pub avg_time_sold_at: f32,
     pub event_history: Vec<SimulationEvent>,
     pub revenue: f64,
     pub avg_regret: f64,
@@ -209,14 +211,14 @@ pub fn simulate_revenue<'a>(
 
     let mut customers: Vec<Customer> = Vec::new();
 
-    let beta_dist = Beta::new(2.0, 5.0).unwrap();
+    let beta_dist = Beta::new(3.0, 6.0).unwrap();
 
     let network = create_network(settings);
 
     let mut id = 0;
-    for i in 0..settings.group_sizes.len() {
-        let group_size = settings.group_sizes[i];
-        let group_mean = settings.group_means[i];
+    for customer_group in 0..settings.group_sizes.len() {
+        let group_size = settings.group_sizes[customer_group];
+        let group_mean = settings.group_means[customer_group];
         for _ in 0..group_size {
             let neighbors = network[id as usize].clone();
             let normal_dist = Normal::new(
@@ -224,19 +226,23 @@ pub fn simulate_revenue<'a>(
                 (group_mean * settings.scaling * 0.2).powf(0.5),
             )
             .unwrap();
-            let wtp_increase = 1.0 + rng.sample(beta_dist);
+            let wtp_increase = 2.0; //+ rng.sample(beta_dist);
             let wtp0: f64 = rng.sample(normal_dist);
 
-            // With 20% probability, assign a random group prediction
-            let predicted_group = if rng.gen_bool(settings.clustering_accuracy) {
-                rng.gen_range(0..settings.group_sizes.len())
+            // With X% probability, assign a random group prediction
+            let predicted_group: usize = if rng.gen_bool(1.0-settings.clustering_accuracy) {
+                rng.gen_range(0..(settings.num_predicted_groups as usize))
             } else {
-                i
+                if (customer_group as usize) < settings.num_predicted_groups as usize {
+                    customer_group as usize
+                } else {
+                    rng.gen_range(0..(settings.num_predicted_groups as usize))
+                }
             };
 
             customers.push(Customer::new(
                 id,
-                i as i32,
+                customer_group as i32,
                 predicted_group as i32,
                 wtp0,
                 wtp0 * wtp_increase,
@@ -254,6 +260,7 @@ pub fn simulate_revenue<'a>(
     let mut n_sold = 0;
     let mut event_count = 0;
     let mut avg_sold_at = 0.0;
+    let mut avg_wtp_increase = 0.0;
 
     let mut event_history: Vec<SimulationEvent> = Vec::new();
 
@@ -276,13 +283,27 @@ pub fn simulate_revenue<'a>(
         let price = algorithm.get_price(
             customers[customer_idx].predicted_group as usize,
             visit_index as usize,
-            0 as usize,
+            // 0,
+            // 0
+            event.0.t.0 as usize,
+            // 0
         ) as f64;
-        let price_diff_pct = (customers[customer_idx].wtp - price) / customers[customer_idx].wtp;
-        let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * 10.0).exp());
+        
+        let period = 5.0;
+        let amplitude = 1.0;
 
-        if price > customers[customer_idx].max_wtp {
-            regret += customers[customer_idx].max_wtp;
+        let time_factor = amplitude * ((1.0 / period * event.0.t.0).sin());
+
+        // println!("Time factor: {}", time_factor);
+        let adjusted_wtp = customers[customer_idx].wtp * (1.0 + time_factor as f64);
+
+        let price_diff_pct = (adjusted_wtp - price) / adjusted_wtp;
+        let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * settings.sigmoid_scale).exp());
+
+
+
+        if price > adjusted_wtp * 1.2 {
+            regret += adjusted_wtp;
             event_history.push(SimulationEvent::new(
                 &customers[customer_idx],
                 event.0.t,
@@ -300,9 +321,10 @@ pub fn simulate_revenue<'a>(
         } else if rng.gen::<f64>() < purchase_prob {
             revenue += price;
             customers[customer_idx].price_hist.push(price);
-            regret += customers[customer_idx].max_wtp - price;
+            regret += adjusted_wtp - price;
             n_sold += 1;
             avg_sold_at += event.0.t.0;
+            avg_wtp_increase += adjusted_wtp - customers[customer_idx].initial_wtp;
 
             // Update the algorithm with the reward (revenue in this case)
             algorithm.update_average_reward(
@@ -328,13 +350,13 @@ pub fn simulate_revenue<'a>(
                 "customer_arrival".to_string(),
                 price,
             );
-            algorithm.update_average_reward(
-                customers[customer_idx].predicted_group as usize,
-                visit_index as usize,
-                event.0.t.0 as usize,
-                0.0,
-                price as i32,
-            );
+            // algorithm.update_average_reward(
+            //     customers[customer_idx].predicted_group as usize,
+            //     visit_index as usize,
+            //     event.0.t.0 as usize,
+            //     0.0,
+            //     price as i32,
+            // );
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }
         let customers_copy = customers.to_vec();
@@ -348,7 +370,7 @@ pub fn simulate_revenue<'a>(
         regret,
         avg_regret: regret / customers.len() as f64,
         n_sold: n_sold as f64 / customers.len() as f64,
-        avg_sold_at: avg_sold_at / n_sold as f32,
+        avg_time_sold_at: avg_sold_at / n_sold as f32,
         event_history,
         revenue,
         customers,
