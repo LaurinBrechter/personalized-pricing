@@ -39,9 +39,8 @@ fn main() {
         lambda: 10,
         mu: 10,
         p: 2,
-        selection: Selection::Plus,
-        mutation_probability: 0.5,
-        mutation_strength: 100.0,
+        selection: Selection::Comma,
+        mutation_strength: 25.0,
         adaptation: Adaptation::None,
         rechenberg_window: 10,
         // num_period_prices: 10,
@@ -53,10 +52,9 @@ fn main() {
         mu: 1,
         p: 1,
         selection: Selection::Plus,
-        mutation_probability: 1.0,
         mutation_strength: 50.0,
         rechenberg_window: 20,
-        adaptation: Adaptation::RechenbergRule,
+        adaptation: Adaptation::None,
         // num_period_prices: 10,
         // num_visits: 10,
     };
@@ -70,62 +68,65 @@ fn main() {
 
     let mut writer = init_log();
     // let result = simulate_custom(&settings);
-    let (mut arms_writer, mut mab_log_writer) = init_log_mab();
-    
-    
-    let config_id = 0;
-    let mut mab = MAB::new(
-        &settings,
-        0.0,
-        settings.max_price,
-        30,
-        0.05,
-        &mut mab_log_writer,
-        0,
-        0
-    );
-
-        
-    for _ in 0..1000 {
-        let result = simulate_revenue(&mut mab, &settings);
-        mab.run_id += 1;
-    }
-    mab.log(&mut arms_writer);
-    let mut mab = MAB::new(
-        &settings,
-        0.0,
-        settings.max_price,
-        30,
-        0.05,
-        &mut mab_log_writer,
-        0,
-        1
-    );
-    settings.clustering_accuracy = 0.7;
-    for _ in 0..1000 {
-        let result = simulate_revenue(&mut mab, &settings);
-        mab.run_id += 1;
-    }
-    mab.log(&mut arms_writer);
-    
-
-
-    // let n_iterations = 1000;
-    // let best_solution = random_search(&settings, n_iterations, );
-
-    // // // // write price matrix to csv
-    
-    // let mut es_writer = init_log_es();
-    // let n_runs = 1;
-    // let mut run_id = 0;
-    // for _ in 0..n_runs {
-    //     let best_solution =
-    //         evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut es_writer);
-    //     log_individual(run_id, &best_solution);
-    //     log_event_history(run_id, &best_solution.simulation_result, &settings);
-    //     println!("Best solution: {:?}", best_solution.fitness_score);
-    //     run_id += 1;
+    // let (mut arms_writer, mut mab_log_writer) = init_log_mab();
+    // let config_id = 0;
+    // let mut mab = MAB::new(
+    //     &settings,
+    //     0.0,
+    //     settings.max_price,
+    //     30,
+    //     0.05,
+    //     &mut mab_log_writer,
+    //     0,
+    //     0
+    // );
+    // for _ in 0..1000 {
+    //     let result = simulate_revenue(&mut mab, &settings);
+    //     mab.run_id += 1;
     // }
+    // mab.log(&mut arms_writer);
+    // let result = simulate_revenue(&mut mab, &settings);
+    // log_event_history(0, &result, &settings);
+    
+    
+    
+    // let mut mab = MAB::new(
+    //     &settings,
+    //     0.0,
+    //     settings.max_price,
+    //     30,
+    //     0.05,
+    //     &mut mab_log_writer,
+    //     0,
+    //     1
+    // );
+    // settings.clustering_accuracy = 0.7;
+    // for _ in 0..1000 {
+    //     let result = simulate_revenue(&mut mab, &settings);
+    //     mab.run_id += 1;
+    // }
+    // mab.log(&mut arms_writer);
+    // let result = simulate_revenue(&mut mab, &settings);
+    // log_event_history(1, &result, &settings);
+    
+
+
+    let n_iterations = 1000;
+    let best_solution = random_search(&settings, n_iterations, );
+
+    // // // // // write price matrix to csv
+    
+    let mut es_writer = init_log_es();
+    let n_runs = 1;
+    let mut run_id = 0;
+    for _ in 0..n_runs {
+        let best_solution =
+            evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut es_writer);
+        log_individual(run_id, &best_solution);
+        log_event_history(run_id, &best_solution.simulation_result, &settings);
+        println!("Best solution: {:?}", best_solution.fitness_score);
+        run_id += 1;
+    }
 
     // settings.num_predicted_groups = 3;
 
@@ -139,6 +140,7 @@ fn main() {
 
 
     // let mut writer = init_log_pso();
+    // let run_id = 0;
     // let best_solution = optimize_pricing(run_id, &settings, &pso_settings, &mut writer);
 
     // pso_settings.inertia_weight = 2.0;

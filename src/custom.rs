@@ -55,7 +55,7 @@ impl<'a> Algorithm for CustomSolution {
 pub fn simulate_custom(settings: &ProblemSettings) {
     let vecA = vec![220.0, 550.0, 140.0];
     let vecB = vec![200.0, 500.0, 125.0];
-    let n_runs = 100;
+    let n_runs = 1000;
     
     let mut total_revenue_A = 0.0;
     let mut total_revenue_B = 0.0;
@@ -101,12 +101,12 @@ pub fn simulate_custom(settings: &ProblemSettings) {
     // Log the best result from all runs
     if let Some((vector_type, best)) = best_result_A {
         println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
-        log_event_history(0, &best, &settings);
+        log_event_history(3, &best, &settings);
     }
 
     if let Some((vector_type, best)) = best_result_B {
         println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
-        log_event_history(1, &best, &settings);
+        log_event_history(4, &best, &settings);
     }
     
     println!("\nResults after {} runs:", n_runs);

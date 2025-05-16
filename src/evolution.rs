@@ -25,7 +25,6 @@ pub struct ESSettings {
     pub mu: i32,     // population size
     pub p: i32,      // number of parents participating in recombination
     pub selection: Selection,
-    pub mutation_probability: f64,
     pub mutation_strength: f64,
     pub adaptation: Adaptation,
     pub rechenberg_window: i32,
@@ -61,11 +60,11 @@ impl<'a> Individual<'a> {
 
         for g in 0..n_groups {
             let mut group_map = HashMap::new();
-            let sampled_price = rng.gen_range(0.0..settings.max_price);
             for w in 0..n_visits {
                 let mut period_prices = Vec::new();
                 // TODO: change back
                 for _ in 0..n_periods {
+                    let sampled_price = rng.gen_range(0.0..settings.max_price);
                     period_prices.push(sampled_price);
                 }
                 group_map.insert(w, period_prices);
@@ -91,9 +90,9 @@ impl<'a> Individual<'a> {
 
         // println!("Initial prices: {:?}", ind.prices.0);
 
-        let result = simulate_revenue(&mut ind, settings);
-        ind.simulation_result = result;
-        ind.fitness_score = ind.simulation_result.revenue;
+        let result = simulate_and_average(&mut ind, settings);
+        ind.simulation_result = result.1;
+        ind.fitness_score = result.0;
         ind
     }
 }
@@ -108,9 +107,9 @@ impl<'a> Algorithm for Individual<'a> {
         //     "get_price: group_id: {}, visit: {}, period: {}",
         //     group_id, visit, period
         // );
-        let converted_period = if period < 50 { 0 } else { 1 };
+        let converted_period = period % 10;
         
-        self.prices.get_price(group_id, 0, period) as i32
+        self.prices.get_price(group_id, 0, converted_period) as i32
         // self.prices.get_price(group_id, visit, period) as i32
     }
 
@@ -166,6 +165,85 @@ fn mutate_solution<'a>(
         },
     }
 }
+
+fn mutate_solution_selective<'a>(
+    individual: &Individual<'a>,
+    settings: &ESSettings,
+) -> Individual<'a> {
+    let mut new_prices = individual.prices.0.clone();
+    let mut rng = rand::thread_rng();
+    
+    // Get all possible indices for mutation
+    let mut all_indices = Vec::new();
+    for (g_idx, group_map) in new_prices.values_mut().enumerate() {
+        for (w_idx, period_prices) in group_map.values_mut().enumerate() {
+            for t_idx in 0..period_prices.len() {
+                if (w_idx == 0 && t_idx < 10) {
+                    all_indices.push((g_idx, w_idx, t_idx));
+                }
+            }
+        }
+    }
+    
+    // Select one random element to mutate
+    if !all_indices.is_empty() {
+        let (g_idx, w_idx, t_idx) = all_indices[rng.gen_range(0..all_indices.len())];
+        
+        // Get the element and mutate it
+        if let Some(group_map) = new_prices.get_mut(&g_idx) {
+            if let Some(period_prices) = group_map.get_mut(&w_idx) {
+                let price = &mut period_prices[t_idx];
+                let normal = Normal::new(0.0, 1.0).unwrap();
+                let mutation = rng.gen_range(0..700);   //settings.mutation_strength * rng.sample(normal);
+                *price = mutation as f64;
+
+                // Ensure price doesn't go below zero
+                if *price < 0.0 {
+                    *price = 0.0;
+                }
+            }
+        }
+        
+        // Optional debugging
+        // println!("Mutated element at ({}, {}, {}): applied mutation {}", g_idx, w_idx, t_idx, mutation);
+    }
+    Individual {
+        prices: PriceMatrix(new_prices),
+        fitness_score: 0.0,
+        ind_id: individual.ind_id,
+        simulation_result: SimulationResult {
+            event_history: vec![],
+            avg_regret: 0.0,
+            regret: 0.0,
+            customers: vec![],
+            avg_time_sold_at: 0.0,
+            n_sold: 0.0,
+            revenue: 0.0,
+        },
+    }
+}
+
+
+
+fn simulate_and_average<'a>(individual: &Individual<'a>, settings: &'a ProblemSettings) -> (f64, SimulationResult<'a>) {
+    let mut total_revenue = 0.0;
+    let mut rng = rand::thread_rng();
+    let n_runs = 10;
+    let mut best_simulation_result = individual.simulation_result.clone();
+
+    for _ in 0..n_runs {
+        let result = simulate_revenue(&mut individual.clone(), settings);
+        total_revenue += result.revenue;
+
+        if result.revenue > best_simulation_result.revenue {
+            best_simulation_result = result;
+        }
+    }
+
+    return (total_revenue / n_runs as f64, best_simulation_result);
+}
+
+
 
 fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
     let mut new_vector = vec![0.0; vectors[0].len()];
@@ -321,6 +399,8 @@ pub fn evolve_pricing<'a>(
 
         let mut avg_score = 0.0;
 
+        println!("Population best score: {}, {}", best_score, gen_best_solution.fitness_score);
+
         // generate offspring
         for _ in 0..algorithm_settings.lambda {
             n_children += 1;
@@ -332,39 +412,39 @@ pub fn evolve_pricing<'a>(
                 let parent_idx = rng.gen_range(0..algorithm_settings.mu);
                 parents.push(population[parent_idx as usize].clone());
             }
-            let mut offspring_individual = intermediate_recombination(parents.clone(), ind_id);
+            let mut offspring_individual = dominant_recombination(parents.clone(), ind_id);
             
-            let simulation_result = simulate_revenue(&mut offspring_individual, settings);
-            offspring_individual.fitness_score = simulation_result.revenue;
-            offspring_individual.simulation_result = simulation_result;
+            let result = simulate_and_average(&mut offspring_individual, settings);
+            offspring_individual.fitness_score = result.0;
+            offspring_individual.simulation_result = result.1;
 
             // Check if offspring is better than parents
             let best_parent_score = parents.iter().map(|p| p.fitness_score).fold(f64::NEG_INFINITY, f64::max);
             if offspring_individual.fitness_score > best_parent_score {
-                // println!("Generation {}, Individual {}: Recombination improved fitness! {:.2} > {:.2}", 
-                //          gen, ind_id, offspring_individual.fitness_score, best_parent_score);
+                println!("Generation {}, Individual {}: Recombination improved fitness! {:.2} > {:.2}", 
+                         gen, ind_id, offspring_individual.fitness_score, best_parent_score);
                 num_recombination_improved += 1;
             }
             
             ind_id += 1;
-            let mut mutated_offspring = mutate_solution(&offspring_individual, &params);
+            let mut mutated_offspring = mutate_solution_selective(&offspring_individual, &params);
 
             n_evals += 1;
-            let simulation_result = simulate_revenue(&mut mutated_offspring, settings);
-            avg_score += simulation_result.revenue;
+            let result = simulate_and_average(&mut mutated_offspring, settings);
+            avg_score += result.0;
 
-            mutated_offspring.fitness_score = simulation_result.revenue;
-            mutated_offspring.simulation_result = simulation_result;
+            mutated_offspring.fitness_score = result.0;
+            mutated_offspring.simulation_result = result.1;
 
             // Check if mutation improved the individual
             if mutated_offspring.fitness_score > offspring_individual.fitness_score {
-                // println!("Generation {}, Individual {}: Mutation improved fitness! {:.2} > {:.2}", 
-                //          gen, ind_id-1, mutated_offspring.fitness_score, offspring_individual.fitness_score);
+                println!("Generation {}, Individual {}: Mutation improved fitness! {:.2} > {:.2}", 
+                         gen, ind_id-1, mutated_offspring.fitness_score, offspring_individual.fitness_score);
                 num_mutation_improved += 1;
             }
 
-            if mutated_offspring.simulation_result.revenue > gen_best_score {
-                gen_best_score = mutated_offspring.simulation_result.revenue;
+            if mutated_offspring.fitness_score > gen_best_score {
+                gen_best_score = mutated_offspring.fitness_score;
                 gen_best_solution = mutated_offspring.clone();
             }
             offspring.push(mutated_offspring);

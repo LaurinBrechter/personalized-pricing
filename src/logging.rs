@@ -46,7 +46,9 @@ pub fn log_event_history(run_id: i32, simulation_result: &SimulationResult, sett
                 event.customer.to_string(),
                 event.customer_wtp.to_string(),
                 event.customer_max_wtp.to_string(),
-                event.group.to_string(),
+                event.adjusted_wtp.to_string(),
+                event.actual_group.to_string(),
+                event.predicted_group.to_string(),
                 event.price.to_string(),
                 event.irp.to_string(),
                 event.erp.to_string(),
@@ -81,7 +83,9 @@ pub fn init_log() -> csv::Writer<File> {
         "customer",
         "customer_wtp",
         "customer_max_wtp",
-        "group",
+        "adjusted_wtp",
+        "actual_group",
+        "predicted_group",
         "price",
         "irp",
         "erp",
@@ -119,7 +123,6 @@ pub fn init_log_es() -> csv::Writer<File> {
             "mu",
             "p",
             "selection",
-            "mutation_probability",
             "mutation_strength",
             "mutation_strat",
             "loss_aversion"
@@ -220,7 +223,6 @@ pub fn log_population<'a>(
                     "plus"
                 })
                 .to_string(),
-                algorithm_settings.mutation_probability.to_string(),
                 algorithm_settings.mutation_strength.to_string(),
                 (if algorithm_settings.adaptation == Adaptation::RechenbergRule {
                     "rechenberg"

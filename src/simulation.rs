@@ -29,15 +29,17 @@ pub struct SimulationEvent {
     pub customer: i32,
     pub customer_wtp: i32,
     pub customer_max_wtp: i32,
-    pub group: i32,
+    pub predicted_group: i32,
+    pub actual_group: i32,
     pub price: i32,
     pub irp: i32,
     pub erp: i32,
     pub rp: i32,
+    pub adjusted_wtp: i32,
 }
 
 impl SimulationEvent {
-    pub fn new(customer: &Customer, t: OrderedFloat<f32>, event: String, price: f64) -> Self {
+    pub fn new(customer: &Customer, t: OrderedFloat<f32>, event: String, price: f64, adjusted_wtp:f64) -> Self {
         SimulationEvent {
             t,
             event,
@@ -47,8 +49,10 @@ impl SimulationEvent {
             irp: customer.irp as i32,
             erp: customer.erp as i32,
             rp: customer.rp as i32,
-            group: customer.group,
+            actual_group: customer.group,
+            predicted_group: customer.predicted_group,
             price: price as i32,
+            adjusted_wtp: adjusted_wtp as i32,
         }
     }
 }
@@ -185,6 +189,7 @@ pub fn init_simulation(
             OrderedFloat(customer.next_visit(&mut rng, 0.0, 0.0)),
             "customer_arrival".to_string(),
             0.0,
+            customer.wtp,
         );
         event_calendar.push(event.clone(), Reverse(event.t));
     }
@@ -289,10 +294,10 @@ pub fn simulate_revenue<'a>(
             // 0
         ) as f64;
         
-        let period = 5.0;
-        let amplitude = 1.0;
+        let period = 10.0;
+        let amplitude = 0.0;
 
-        let time_factor = amplitude * ((1.0 / period * event.0.t.0).sin());
+        let time_factor = amplitude * ((2.0 * std::f64::consts::PI * event.0.t.0 as f64 / period).sin());
 
         // println!("Time factor: {}", time_factor);
         let adjusted_wtp = customers[customer_idx].wtp * (1.0 + time_factor as f64);
@@ -309,6 +314,7 @@ pub fn simulate_revenue<'a>(
                 event.0.t,
                 "quit".to_string(),
                 price,
+                adjusted_wtp
             ));
             algorithm.update_average_reward(
                 customers[customer_idx].predicted_group as usize,
@@ -340,6 +346,7 @@ pub fn simulate_revenue<'a>(
                 event.0.t,
                 "sold".to_string(),
                 price,
+                adjusted_wtp
             ));
         } else {
             let next_visit =
@@ -349,6 +356,7 @@ pub fn simulate_revenue<'a>(
                 OrderedFloat(next_visit),
                 "customer_arrival".to_string(),
                 price,
+                adjusted_wtp
             );
             // algorithm.update_average_reward(
             //     customers[customer_idx].predicted_group as usize,
