@@ -28,21 +28,23 @@ fn main() {
         k_neighbors: 6,
         p_intra: 0.1,
         p_inter: 0.3,
-        global_wom_prob: 0.0,
+        global_wom_prob: 0.2,
         max_price: 700.0,
         num_predicted_groups: 3,
-        sigmoid_scale: 1000.0
+        sigmoid_scale: 5.0
     };
 
     let mut es_default_settings = ESSettings {
-        num_generations: 100,
-        lambda: 10,
-        mu: 10,
+        num_generations: 20,
+        lambda: 30,
+        mu: 20,
         p: 2,
-        selection: Selection::Comma,
-        mutation_strength: 25.0,
+        selection: Selection::Plus,
+        mutation_strength: 50.0,
         adaptation: Adaptation::None,
         rechenberg_window: 10,
+        fn_evals: 5,
+        resample: false
         // num_period_prices: 10,
         // num_visits: 10,
     };
@@ -52,9 +54,11 @@ fn main() {
         mu: 1,
         p: 1,
         selection: Selection::Plus,
-        mutation_strength: 50.0,
+        mutation_strength: 25.0,
         rechenberg_window: 20,
-        adaptation: Adaptation::None,
+        adaptation: Adaptation::RechenbergRule,
+        fn_evals: 1,
+        resample: false
         // num_period_prices: 10,
         // num_visits: 10,
     };
@@ -64,10 +68,11 @@ fn main() {
         inertia_weight: 0.7,
         cognitive_coefficient: 1.5,
         social_coefficient: 1.5,
+        fn_evals: 1,
     };
 
     let mut writer = init_log();
-    // let result = simulate_custom(&settings);
+    let result = simulate_custom(&settings);
     // let (mut arms_writer, mut mab_log_writer) = init_log_mab();
     // let config_id = 0;
     // let mut mab = MAB::new(
@@ -111,36 +116,44 @@ fn main() {
     
 
 
-    let n_iterations = 1000;
-    let best_solution = random_search(&settings, n_iterations, );
+    // let n_iterations = 1000;
+    // let best_solution = random_search(&settings, n_iterations, );
 
     // // // // // write price matrix to csv
     
-    let mut es_writer = init_log_es();
-    let n_runs = 1;
-    let mut run_id = 0;
-    for _ in 0..n_runs {
-        let best_solution =
-            evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut es_writer);
-        log_individual(run_id, &best_solution);
-        log_event_history(run_id, &best_solution.simulation_result, &settings);
-        println!("Best solution: {:?}", best_solution.fitness_score);
-        run_id += 1;
-    }
-
-    // settings.num_predicted_groups = 3;
-
+    // let mut es_writer = init_log_es();
+    // // es_steady_state_settings.mutation_strength = 250.0;
+    // let n_runs = 1;
+    // let mut run_id = 0;
     // for _ in 0..n_runs {
-    //     let best_solution =
-    //         evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut writer);
-    //     log_individual(&best_solution);
-    //     log_event_history(run_id, &best_solution, &settings);
+    //     let (initial_best, best) =
+    //         evolve_pricing(run_id, &settings, &es_default_settings, &mut es_writer);
+    //     log_individual("initial", run_id, &initial_best);
+    //     log_individual("best", run_id, &best);
+    //     log_event_history(run_id, &best.simulation_result, &settings);
+    //     println!("Best solution: {:?}", best.fitness_score);
     //     run_id += 1;
     // }
 
+    // es_steady_state_settings.fn_evals = 1;
+
+    // for _ in 0..n_runs {
+    //     let best_solution =
+    //         evolve_pricing(run_id, &settings, &es_steady_state_settings, &mut es_writer);
+    //     log_individual(run_id, &best_solution);
+    //     log_event_history(run_id, &best_solution.simulation_result, &settings);
+    //     run_id += 1;
+    // }
+    
+
 
     // let mut writer = init_log_pso();
-    // let run_id = 0;
+    // let mut run_id = 0;
+    // let best_solution = optimize_pricing(run_id, &settings, &pso_settings, &mut writer);
+    // log_individual(run_id, &best_solution);
+    // log_event_history(run_id, &best_solution.simulation_result, &settings);
+    // pso_settings.fn_evals = 5;
+    // run_id += 1;
     // let best_solution = optimize_pricing(run_id, &settings, &pso_settings, &mut writer);
 
     // pso_settings.inertia_weight = 2.0;

@@ -92,11 +92,11 @@ impl<'a> Customer<'a> {
     // LABEL
     pub fn update_erp(&mut self, other_customers: &Vec<Customer>) {
         let mut ref_prices: Vec<f64> = vec![];
-        for &neighbor_id in &self.neighbors {
-            if let Some(&price) = other_customers[neighbor_id as usize].price_hist.last() {
-                ref_prices.push(price);
-            }
-        }
+        // for &neighbor_id in &self.neighbors {
+        //     if let Some(&price) = other_customers[neighbor_id as usize].price_hist.last() {
+        //         ref_prices.push(price);
+        //     }
+        // }
         for customer in other_customers {
             if customer.id == self.id {
                 continue;
@@ -304,10 +304,14 @@ pub fn simulate_revenue<'a>(
 
         let price_diff_pct = (adjusted_wtp - price) / adjusted_wtp;
         let purchase_prob = 1.0 / (1.0 + (-price_diff_pct * settings.sigmoid_scale).exp());
+        
+        
+        let customers_copy = customers.to_vec();
+
+        customers[customer_idx].update_erp(&customers_copy);
 
 
-
-        if price > adjusted_wtp * 1.2 {
+        if price > adjusted_wtp * 3.0 {
             regret += adjusted_wtp;
             event_history.push(SimulationEvent::new(
                 &customers[customer_idx],
@@ -367,9 +371,7 @@ pub fn simulate_revenue<'a>(
             // );
             event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
         }
-        let customers_copy = customers.to_vec();
         customers[customer_idx].update_irp(price);
-        customers[customer_idx].update_erp(&customers_copy);
         customers[customer_idx].update_rp();
         customers[customer_idx].update_wtp();
     }

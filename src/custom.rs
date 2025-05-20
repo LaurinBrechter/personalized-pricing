@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fs, vec};
 use rand::Rng;
 use crate::{ evolution::PriceMatrix, logging::log_event_history, mab::Algorithm, simulation::{simulate_revenue, ProblemSettings} };
 
@@ -53,64 +53,67 @@ impl<'a> Algorithm for CustomSolution {
 }
 
 pub fn simulate_custom(settings: &ProblemSettings) {
-    let vecA = vec![220.0, 550.0, 140.0];
-    let vecB = vec![200.0, 500.0, 125.0];
-    let n_runs = 1000;
+
+    fs::remove_file("./results/custom_log.csv").unwrap_or_else(|e| {
+        println!("Error removing file: {}", e);
+    });
+
+    let mut writer = csv::Writer::from_path("./results/custom_log.csv").unwrap();
+    let header = vec![
+        "run_id",
+        "revenue",
+    ];
+    writer.write_record(&header).unwrap();
+
+    let scenarios = vec![
+        vec![140.0, 350.0, 87.5],
+        vec![200.0, 500.0, 125.0],
+        vec![260.0, 650.0, 162.5],
+    ];
+    let n_runs = 500;
     
-    let mut total_revenue_A = 0.0;
-    let mut total_revenue_B = 0.0;
     
     println!("Running {} simulations for each price vector...", n_runs);
-
-    let mut best_result_A = None;
-    let mut best_result_B = None;
-    let mut best_revenue_A= 0.0;
-    let mut best_revenue_B= 0.0;
     
-    for i in 0..n_runs {
-        let mut custom_solution_A = CustomSolution::new(vecA.clone(), settings);
-        let mut custom_solution_B = CustomSolution::new(vecB.clone(), settings);
+    
+    
+    for (scenario_id, scenario) in scenarios.iter().enumerate() {
+        let mut total_revenue = 0.0;
+        let mut best_result = None;
+        let mut best_revenue= 0.0;
+        for i in 0..n_runs {
+            let mut solution = CustomSolution::new(scenario.clone(), settings);
+            
+            let res = simulate_revenue(&mut solution, settings);
+            
+            total_revenue += res.revenue as f64;
+            
+            writer
+                .write_record(&[scenario_id.to_string(), res.revenue.to_string()])
+                .unwrap();
+
+            // println!("Run {}: Vector A: {:.2}, Vector B: {:.2}", 
+            //     i + 1, 
+            //     res.n_sold, 
+            //     res_B.n_sold
+            // );
+            
+            // Track the best result (highest revenue)
+            if res.revenue as f64 > best_revenue {
+                best_revenue = res.revenue as f64;
+                best_result = Some(("A", res.clone()));
+            }
+    }
         
-        let res_A = simulate_revenue(&mut custom_solution_A, settings);
-        let res_B = simulate_revenue(&mut custom_solution_B, settings);
-        
-        total_revenue_A += res_A.revenue as f64;
-        total_revenue_B += res_B.revenue as f64;
-        
-        // println!("Run {}: Vector A: {:.2}, Vector B: {:.2}", 
-        //     i + 1, 
-        //     res_A.n_sold, 
-        //     res_B.n_sold
-        // );
-        
-        // Track the best result (highest revenue)
-        if res_A.revenue as f64 > best_revenue_A {
-            best_revenue_A = res_A.revenue as f64;
-            best_result_A = Some(("A", res_A.clone()));
+        if let Some((vector_type, best)) = best_result.as_ref() {
+            println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
+            log_event_history(scenario_id as i32, best, &settings);
         }
-        
-        if res_B.revenue as f64 > best_revenue_B {
-            best_revenue_B = res_B.revenue as f64;
-            best_result_B = Some(("B", res_B.clone()));
-        }
+
+    println!("Vector average revenue: {:.2}", total_revenue / n_runs as f64);
     }
     
-    let avg_revenue_A = total_revenue_A / n_runs as f64;
-    let avg_revenue_B = total_revenue_B / n_runs as f64;
 
     // Log the best result from all runs
-    if let Some((vector_type, best)) = best_result_A {
-        println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
-        log_event_history(3, &best, &settings);
-    }
-
-    if let Some((vector_type, best)) = best_result_B {
-        println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
-        log_event_history(4, &best, &settings);
-    }
     
-    println!("\nResults after {} runs:", n_runs);
-    println!("Vector A average revenue: {:.2}", avg_revenue_A);
-    println!("Vector B average revenue: {:.2}", avg_revenue_B);
-    println!("Difference (A - B): {:.2}", avg_revenue_A - avg_revenue_B);
 }

@@ -28,6 +28,8 @@ pub struct ESSettings {
     pub mutation_strength: f64,
     pub adaptation: Adaptation,
     pub rechenberg_window: i32,
+    pub fn_evals: i32,
+    pub resample: bool // resample parents before selection
 }
 
 #[derive(Clone, Debug)]
@@ -54,6 +56,7 @@ impl<'a> Individual<'a> {
         n_periods: usize,
         n_groups: usize,
         settings: &'a ProblemSettings,
+        n_evals:i32
     ) -> Self {
         let mut rng = rand::thread_rng();
         let mut prices = HashMap::new();
@@ -90,7 +93,7 @@ impl<'a> Individual<'a> {
 
         // println!("Initial prices: {:?}", ind.prices.0);
 
-        let result = simulate_and_average(&mut ind, settings);
+        let result = simulate_and_average(&mut ind, settings, n_evals);
         ind.simulation_result = result.1;
         ind.fitness_score = result.0;
         ind
@@ -169,6 +172,7 @@ fn mutate_solution<'a>(
 fn mutate_solution_selective<'a>(
     individual: &Individual<'a>,
     settings: &ESSettings,
+    n_changes: usize,
 ) -> Individual<'a> {
     let mut new_prices = individual.prices.0.clone();
     let mut rng = rand::thread_rng();
@@ -187,19 +191,23 @@ fn mutate_solution_selective<'a>(
     
     // Select one random element to mutate
     if !all_indices.is_empty() {
-        let (g_idx, w_idx, t_idx) = all_indices[rng.gen_range(0..all_indices.len())];
+        for _ in 0..n_changes {
+            let (g_idx, w_idx, t_idx) = all_indices[rng.gen_range(0..all_indices.len())];
         
-        // Get the element and mutate it
-        if let Some(group_map) = new_prices.get_mut(&g_idx) {
-            if let Some(period_prices) = group_map.get_mut(&w_idx) {
-                let price = &mut period_prices[t_idx];
-                let normal = Normal::new(0.0, 1.0).unwrap();
-                let mutation = rng.gen_range(0..700);   //settings.mutation_strength * rng.sample(normal);
-                *price = mutation as f64;
+            // Get the element and mutate it
+            if let Some(group_map) = new_prices.get_mut(&g_idx) {
+                if let Some(period_prices) = group_map.get_mut(&w_idx) {
+                    let price = &mut period_prices[t_idx];
+                    let normal = Normal::new(0.0, 1.0).unwrap();
+                    // let mutation = settings.mutation_strength * rng.sample(normal);
+                    let mutation = rng.gen_range(0..700);   //settings.mutation_strength * rng.sample(normal);
+        
+                    *price = mutation as f64;
 
-                // Ensure price doesn't go below zero
-                if *price < 0.0 {
-                    *price = 0.0;
+                    // Ensure price doesn't go below zero
+                    if *price < 0.0 {
+                        *price = 0.0;
+                    }
                 }
             }
         }
@@ -225,7 +233,7 @@ fn mutate_solution_selective<'a>(
 
 
 
-fn simulate_and_average<'a>(individual: &Individual<'a>, settings: &'a ProblemSettings) -> (f64, SimulationResult<'a>) {
+fn simulate_and_average<'a>(individual: &Individual<'a>, settings: &'a ProblemSettings, n_evals:i32) -> (f64, SimulationResult<'a>) {
     let mut total_revenue = 0.0;
     let mut rng = rand::thread_rng();
     let n_runs = 10;
@@ -350,7 +358,7 @@ pub fn evolve_pricing<'a>(
     settings: &'a ProblemSettings,
     algorithm_settings: &ESSettings,
     mut writer: &mut csv::Writer<File>,
-) -> Individual<'a> {
+) -> (Individual<'a>, Individual<'a>) {
     // population as a vector of individuals.
     let mut population: Vec<Individual<'a>> = Vec::new();
     let mut n_evals = 0;
@@ -369,21 +377,22 @@ pub fn evolve_pricing<'a>(
             settings.n_periods as usize,
             settings.n_groups as usize,
             settings,
+            algorithm_settings.fn_evals
         ));
         ind_id += 1;
 
     }
 
-    let mut best_solution = population[0].clone();
-    let mut best_score = population
-        .iter()
-        .map(|ind| ind.fitness_score)
-        .fold(f64::NEG_INFINITY, f64::max);
+    let best_individual = population.iter()
+    .max_by(|a, b| a.fitness_score.partial_cmp(&b.fitness_score).unwrap())
+    .unwrap();
+    let mut best_solution = best_individual.clone();
+    let mut best_score = best_individual.fitness_score;
 
     let mut success_count = 0;
     let mut prev_best_score = f64::NEG_INFINITY;
 
-
+    let initial_best_solution = best_solution.clone();
 
     println!("Initial best score: {}", best_score);
 
@@ -412,9 +421,9 @@ pub fn evolve_pricing<'a>(
                 let parent_idx = rng.gen_range(0..algorithm_settings.mu);
                 parents.push(population[parent_idx as usize].clone());
             }
-            let mut offspring_individual = dominant_recombination(parents.clone(), ind_id);
+            let mut offspring_individual = intermediate_recombination(parents.clone(), ind_id);
             
-            let result = simulate_and_average(&mut offspring_individual, settings);
+            let result = simulate_and_average(&mut offspring_individual, settings, algorithm_settings.fn_evals);
             offspring_individual.fitness_score = result.0;
             offspring_individual.simulation_result = result.1;
 
@@ -427,10 +436,10 @@ pub fn evolve_pricing<'a>(
             }
             
             ind_id += 1;
-            let mut mutated_offspring = mutate_solution_selective(&offspring_individual, &params);
+            let mut mutated_offspring = mutate_solution_selective(&offspring_individual, &params, 3);
 
             n_evals += 1;
-            let result = simulate_and_average(&mut mutated_offspring, settings);
+            let result = simulate_and_average(&mut mutated_offspring, settings, algorithm_settings.fn_evals);
             avg_score += result.0;
 
             mutated_offspring.fitness_score = result.0;
@@ -498,7 +507,7 @@ pub fn evolve_pricing<'a>(
                 let success_rate =
                     success_count as f64 / algorithm_settings.rechenberg_window as f64;
 
-                // println!("Success rate: {}, {}, {}", success_rate, params.mutation_strength, gen_best_score);
+                println!("Success rate: {}, {}, {}", success_rate, params.mutation_strength, gen_best_score);
 
                 params.mutation_strength = if success_rate > 0.2 {
                     params.mutation_strength * 1.22
@@ -513,6 +522,16 @@ pub fn evolve_pricing<'a>(
             }
             prev_best_score = gen_best_score;
         }
+
+        if algorithm_settings.resample {
+    // Reevaluate each individual in the population to prevent lucky solutions
+            for individual in &mut population {
+                let result = simulate_and_average(individual, settings, algorithm_settings.fn_evals);
+                individual.fitness_score = result.0;
+                individual.simulation_result = result.1;
+            }
+        }
+
 
         if algorithm_settings.selection == Selection::Comma {
             // Sort offspring by fitness score and take the mu best individuals
@@ -536,5 +555,5 @@ pub fn evolve_pricing<'a>(
         num_mutation_improved, num_recombination_improved, n_children
     );
     // println!("Best overall revenue found: {}", best_score);
-    best_solution
+    (initial_best_solution, best_solution)
 }

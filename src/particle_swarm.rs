@@ -1,7 +1,6 @@
 use crate::evolution::{Individual, PriceMatrix};
 use crate::simulation::{simulate_revenue, ProblemSettings, SimulationEvent, SimulationResult};
 use rand::Rng;
-use core::num;
 use std::{collections::HashMap, fs::File};
 pub struct PSOSettings {
     pub num_iterations: i32,
@@ -9,27 +8,28 @@ pub struct PSOSettings {
     pub inertia_weight: f64,
     pub cognitive_coefficient: f64, // c1
     pub social_coefficient: f64,    // c2
+    pub fn_evals: i32,
 }
 use crate::mab::Algorithm;
 
 #[derive(Clone, Debug)]
-struct Particle {
+struct Particle<'a> {
     position: PriceMatrix, // Same structure as Individual's prices
     velocity: PriceMatrix,
     best_position: PriceMatrix,
     current_fitness: f64,
     best_fitness: f64,
     particle_id: i32,
-    event_history: Vec<SimulationEvent>,
+    simulation_result: SimulationResult<'a>,
 }
 
-impl Particle {
+impl<'a> Particle<'a> {
     fn new(
         particle_id: i32,
         n_visits: usize,
         n_periods: usize,
         n_groups: usize,
-        settings: &ProblemSettings,
+        settings: &'a ProblemSettings,
     ) -> Self {
         let mut rng = rand::thread_rng();
         let mut position = HashMap::new();
@@ -60,19 +60,27 @@ impl Particle {
             current_fitness: 0.0,
             best_fitness: 0.0,
             particle_id,
+            simulation_result: SimulationResult {
             event_history: vec![],
+            avg_regret: 0.0,
+            regret: 0.0,
+            customers: vec![],
+            avg_time_sold_at: 0.0,
+            n_sold: 0.0,
+            revenue: 0.0,
+        }
         };
 
         // Evaluate initial position
         let result = simulate_revenue(&mut particle, settings);
         particle.current_fitness = result.revenue;
         particle.best_fitness = result.revenue;
-        particle.event_history = result.event_history;
+        particle.simulation_result = result;
 
         particle
     }
 
-    fn to_individual<'a>(&self, result: SimulationResult<'a>) -> Individual<'a> {
+    fn to_individual(&self, result: SimulationResult<'a>) -> Individual<'a> {
         Individual {
             prices: self.position.clone(),
             fitness_score: self.current_fitness,
@@ -100,7 +108,7 @@ impl Particle {
                                 - self.position.get_price(*g, *w, t));
 
                     // Limit velocity if needed
-                    velocities[t] = velocities[t].clamp(-10.0, 10.0);
+                    // velocities[t] = velocities[t].clamp(-10.0, 10.0);
                 }
             }
         }
@@ -119,9 +127,28 @@ impl Particle {
     }
 }
 
-impl Algorithm for Particle {
+fn simulate_and_average<'a>(algorithm: &mut dyn Algorithm, settings: &'a ProblemSettings, n_evals:i32) -> (f64, SimulationResult<'a>) {
+    let mut total_revenue = 0.0;
+    let mut rng = rand::thread_rng();
+    let n_runs = 10;
+    let mut best_simulation_result: Option<SimulationResult<'a>> = None;
+
+    for _ in 0..n_runs {
+        let result = simulate_revenue(algorithm, settings);
+        total_revenue += result.revenue;
+
+        if best_simulation_result.is_none() || result.revenue > best_simulation_result.as_ref().unwrap().revenue {
+            best_simulation_result = Some(result);
+        }
+    }
+
+    return (total_revenue / n_runs as f64, best_simulation_result.unwrap());
+}
+
+impl<'a> Algorithm for Particle<'a> {
     fn get_price(&mut self, group_id: usize, visit: usize, period: usize) -> i32 {
-        self.position.get_price(group_id, 0, 0) as i32
+        let converted_period = period % 10;
+        self.position.get_price(group_id, visit, converted_period) as i32
     }
 
     fn update_average_reward(
@@ -155,6 +182,7 @@ fn log_iteration(
                 settings.inertia_weight.to_string(),
                 settings.cognitive_coefficient.to_string(),
                 settings.social_coefficient.to_string(),
+                settings.fn_evals.to_string()
             ])
             .unwrap();
     }
@@ -200,12 +228,13 @@ pub fn optimize_pricing<'a>(
             particle.update_position();
 
             // Evaluate new position
-            let result = simulate_revenue(particle, settings);
-            particle.current_fitness = result.revenue;
-            particle.event_history = result.event_history;
+            let result = simulate_and_average(particle, settings, pso_settings.fn_evals);
+            particle.current_fitness = result.0;
+            particle.simulation_result = result.1;
 
             // Update particle's best if needed
             if particle.current_fitness > particle.best_fitness {
+                println!("Particle {} improved its best fitness from {} to {}", particle.particle_id, particle.best_fitness, particle.current_fitness);
                 particle.best_fitness = particle.current_fitness;
                 particle.best_position = particle.position.clone();
 
@@ -230,6 +259,6 @@ pub fn optimize_pricing<'a>(
         .max_by(|a, b| a.current_fitness.partial_cmp(&b.current_fitness).unwrap())
         .unwrap();
 
-    let final_result = simulate_revenue(best_particle, settings);
-    best_particle.to_individual(final_result)
+    let final_result = simulate_and_average(best_particle, settings, pso_settings.fn_evals);
+    best_particle.to_individual(final_result.1)
 }

@@ -1,7 +1,7 @@
 use crate::{evolution::{Adaptation, ESSettings, Individual, Selection}, simulation::{ProblemSettings, SimulationResult}};
 use std::fs::{self, File};
 
-pub fn log_individual(run_id: i32, best_solution: &Individual) {
+pub fn log_individual(type_: &str, run_id: i32, best_solution: &Individual) {
     let file = std::fs::OpenOptions::new()
         .write(true)
         .create(true)
@@ -16,6 +16,7 @@ pub fn log_individual(run_id: i32, best_solution: &Individual) {
                 // println!("{}", price);
                 writer
                     .write_record(&[
+                        type_.to_string(),
                         run_id.to_string(),
                         group.to_string(),
                         visit.to_string(),
@@ -72,7 +73,7 @@ pub fn init_log() -> csv::Writer<File> {
     });
 
     let mut writer = csv::Writer::from_path("./results/price_matrix.csv").unwrap();
-    let header = vec!["group", "visit", "t", "price"];
+    let header = vec!["type", "group", "visit", "t", "price"];
     writer.write_record(&header).unwrap();
 
     let mut writer = csv::Writer::from_path("./results/event_history.csv").unwrap();
@@ -154,6 +155,7 @@ pub fn init_log_pso() -> csv::Writer<File> {
             "inertia_weight",
             "cognitive_coefficient",
             "social_coefficient",
+            "fn_evals"
         ])
         .unwrap();
     return writer;
