@@ -46,10 +46,15 @@ pub fn create_network(settings: &ProblemSettings) -> Vec<Vec<i32>> {
         let group_end = group_starts[group as usize + 1];
 
         for i in group_start..group_end {
-            for other_group in (group + 1)..settings.n_groups {
+            for g in 0..settings.n_groups {
+
+                if g == group {
+                    continue;
+                }
+
                 if rng.gen::<f64>() < settings.p_inter {
-                    let other_start = group_starts[other_group as usize];
-                    let other_end = group_starts[other_group as usize + 1];
+                    let other_start = group_starts[g as usize];
+                    let other_end = group_starts[g as usize + 1];
                     let target = rng.gen_range(other_start..other_end) as i32;
                     network[i as usize].push(target);
                     network[target as usize].push(i as i32);

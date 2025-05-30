@@ -1,3 +1,4 @@
+use std::os::fd::IntoRawFd;
 use std::{collections::HashMap, fs::File};
 
 use crate::logging::log_population;
@@ -37,7 +38,36 @@ pub struct PriceMatrix(pub HashMap<usize, HashMap<usize, Vec<f64>>>);
 
 impl PriceMatrix {
     pub fn get_price(&self, g: usize, w: usize, t: usize) -> f64 {
-        self.0[&g][&w][t]
+        // Check if the group exists
+        match self.0.get(&g) {
+            Some(group_map) => {
+                // Check if the visit exists within the group
+                match group_map.get(&w) {
+                    Some(period_prices) => {
+                        // Check if the time period is within bounds
+                        if t < period_prices.len() {
+                            period_prices[t]
+                        } else {
+                            eprintln!("ERROR: Index out of bounds - g={}, w={}, t={} (max t={})", 
+                                      g, w, t, period_prices.len().saturating_sub(1));
+                            0.0 // Return default value
+                        }
+                    }
+                    None => {
+                        eprintln!("ERROR: Missing visit key - g={}, w={}", g, w);
+                        // Print available visit keys for debugging
+                        eprintln!("Available visits for group {}: {:?}", g, group_map.keys().collect::<Vec<_>>());
+                        0.0 // Return default value
+                    }
+                }
+            }
+            None => {
+                eprintln!("ERROR: Missing group key - g={}", g);
+                // Print available group keys for debugging
+                eprintln!("Available groups: {:?}", self.0.keys().collect::<Vec<_>>());
+                0.0 // Return default value
+            }
+        }
     }
 }
 
@@ -65,7 +95,6 @@ impl<'a> Individual<'a> {
             let mut group_map = HashMap::new();
             for w in 0..n_visits {
                 let mut period_prices = Vec::new();
-                // TODO: change back
                 for _ in 0..n_periods {
                     let sampled_price = rng.gen_range(0.0..settings.max_price);
                     period_prices.push(sampled_price);
@@ -111,8 +140,8 @@ impl<'a> Algorithm for Individual<'a> {
         //     group_id, visit, period
         // );
         let converted_period = period % 10;
-        
-        self.prices.get_price(group_id, 0, converted_period) as i32
+
+        self.prices.get_price(group_id, 0, converted_period) as i32 // converted_period) as i32
         // self.prices.get_price(group_id, visit, period) as i32
     }
 
@@ -140,16 +169,13 @@ fn mutate_solution<'a>(
     // iterate over all prices and mutate them
     for group_map in new_prices.values_mut() {
         for period_prices in group_map.values_mut() {
+            let normal = Normal::new(0.0, 1.0).unwrap();
             for price in period_prices.iter_mut() {
-                // mutate with 30% probability
-                // if rng.gen_bool(settings.mutation_probability) {
-                    let normal = Normal::new(0.0, 1.0).unwrap();
-                    let mutation = settings.mutation_strength * rng.sample(normal);
+                let mutation = settings.mutation_strength * rng.sample(normal);
                     *price += mutation;
                     if *price < 0.0 {
                         *price = 0.0;
                     }
-                // }
             }
         }
     }
@@ -252,22 +278,6 @@ fn simulate_and_average<'a>(individual: &Individual<'a>, settings: &'a ProblemSe
 }
 
 
-
-fn average_vectors(vectors: &Vec<Vec<f64>>) -> Vec<f64> {
-    let mut new_vector = vec![0.0; vectors[0].len()];
-    for vector in vectors {
-        for (i, value) in vector.iter().enumerate() {
-            new_vector[i] += value;
-        }
-    }
-
-    for value in new_vector.iter_mut() {
-        *value /= vectors.len() as f64;
-    }
-
-    new_vector
-}
-
 fn intermediate_recombination<'a>(individuals: Vec<Individual<'a>>, ind_id: i32) -> Individual<'a> {
     let mut prices = HashMap::new();
     let n_parents = individuals.len() as f64;
@@ -329,7 +339,7 @@ fn dominant_recombination<'a>(individuals: Vec<Individual<'a>>, ind_id: i32) -> 
             for t in 0..n_periods {
                 // Randomly select a parent for each price
                 let random_parent = &individuals[rng.gen_range(0..individuals.len())];
-                let price = random_parent.prices.0[&g][&w][t];
+                let price: f64 = random_parent.prices.0[&g][&w][t];
                 period_prices.push(price);
             }
             group_map.insert(w, period_prices);
@@ -436,7 +446,7 @@ pub fn evolve_pricing<'a>(
             }
             
             ind_id += 1;
-            let mut mutated_offspring = mutate_solution_selective(&offspring_individual, &params, 3);
+            let mut mutated_offspring = mutate_solution(&offspring_individual, &params);
 
             n_evals += 1;
             let result = simulate_and_average(&mut mutated_offspring, settings, algorithm_settings.fn_evals);

@@ -52,25 +52,16 @@ impl<'a> Algorithm for CustomSolution {
     }
 }
 
-pub fn simulate_custom(settings: &ProblemSettings) {
+pub fn simulate_custom(settings: &ProblemSettings, run_id: i32, writer: &mut csv::Writer<fs::File>) {
 
-    fs::remove_file("./results/custom_log.csv").unwrap_or_else(|e| {
-        println!("Error removing file: {}", e);
-    });
-
-    let mut writer = csv::Writer::from_path("./results/custom_log.csv").unwrap();
-    let header = vec![
-        "run_id",
-        "revenue",
-    ];
-    writer.write_record(&header).unwrap();
+    
 
     let scenarios = vec![
-        vec![140.0, 350.0, 87.5],
+        // vec![140.0, 350.0, 87.5],
         vec![200.0, 500.0, 125.0],
-        vec![260.0, 650.0, 162.5],
+        // vec![260.0, 650.0, 162.5],
     ];
-    let n_runs = 500;
+    let n_runs = 30;
     
     
     println!("Running {} simulations for each price vector...", n_runs);
@@ -86,10 +77,15 @@ pub fn simulate_custom(settings: &ProblemSettings) {
             
             let res = simulate_revenue(&mut solution, settings);
             
+            
+
             total_revenue += res.revenue as f64;
             
             writer
-                .write_record(&[scenario_id.to_string(), res.revenue.to_string()])
+                .write_record(&[
+                    scenario_id.to_string(), 
+                    (run_id as usize).to_string(), 
+                    res.revenue.to_string()])
                 .unwrap();
 
             // println!("Run {}: Vector A: {:.2}, Vector B: {:.2}", 
@@ -107,7 +103,26 @@ pub fn simulate_custom(settings: &ProblemSettings) {
         
         if let Some((vector_type, best)) = best_result.as_ref() {
             println!("\nBest result: Vector {} with revenue {:.2}", vector_type, best.revenue);
-            log_event_history(scenario_id as i32, best, &settings);
+            log_event_history((scenario_id as i32 + run_id), best, &settings);
+        
+            // let file = std::fs::OpenOptions::new()
+            //     .write(true)
+            //     .create(true)
+            //     .append(true)
+            //     .open("./results/wom_network.csv")
+            //     .unwrap();
+
+            // let mut writer = csv::Writer::from_writer(file);
+            // for cust in best.customers.iter() {
+            //     writer
+            //         .write_record(&[
+            //             cust.id.to_string(),
+            //             cust.group.to_string(),
+            //             cust.wtp.to_string(),
+            //         ])
+            //         .unwrap();
+            // }
+
         }
 
     println!("Vector average revenue: {:.2}", total_revenue / n_runs as f64);

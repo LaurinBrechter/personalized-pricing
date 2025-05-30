@@ -56,7 +56,7 @@ impl<'a> RandomSearchIndividual<'a> {
 
 impl<'a> Algorithm for RandomSearchIndividual<'a> {
     fn get_price(&mut self, group_id: usize, visit: usize, period: usize) -> i32 {
-        self.prices[&group_id][&0][0] as i32
+        self.prices[&group_id][&visit][period] as i32
     }
 
     fn update_average_reward(

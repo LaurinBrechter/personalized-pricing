@@ -155,7 +155,8 @@ pub fn init_log_pso() -> csv::Writer<File> {
             "inertia_weight",
             "cognitive_coefficient",
             "social_coefficient",
-            "fn_evals"
+            "fn_evals",
+            "velocity_norm",
         ])
         .unwrap();
     return writer;
@@ -177,7 +178,7 @@ pub fn init_log_mab() -> (csv::Writer<File>, csv::Writer<File>) {
             .unwrap();
     let mut arms_writer = csv::Writer::from_writer(file);
     arms_writer
-        .write_record(&["run_id", "t", "group", "best_price"])
+        .write_record(&["config_id", "epsilon", "strategy", "t", "group", "best_price", "num_pulls"])
         .unwrap();
 
     let file = std::fs::OpenOptions::new()

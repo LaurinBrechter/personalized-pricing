@@ -18,7 +18,7 @@ pub struct Customer<'a> {
     max_wtp: f64,         // maximum willingness to pay
     price_hist: Vec<f64>, // history of prices
     settings: &'a ProblemSettings,
-    neighbors: Vec<i32>, // list of the ids of neighboring customers
+    pub neighbors: Vec<i32>, // list of the ids of neighboring customers
     initial_wtp: f64,
 }
 
@@ -92,24 +92,27 @@ impl<'a> Customer<'a> {
     // LABEL
     pub fn update_erp(&mut self, other_customers: &Vec<Customer>) {
         let mut ref_prices: Vec<f64> = vec![];
-        // for &neighbor_id in &self.neighbors {
-        //     if let Some(&price) = other_customers[neighbor_id as usize].price_hist.last() {
-        //         ref_prices.push(price);
-        //     }
-        // }
-        for customer in other_customers {
-            if customer.id == self.id {
-                continue;
+        for &neighbor_id in &self.neighbors {
+            if let Some(&price) = other_customers[neighbor_id as usize].price_hist.last() {
+                ref_prices.push(price);
             } else {
-                if rand::thread_rng().gen::<f64>() < self.settings.global_wom_prob {
-                    ref_prices.push(customer.wtp);
-                }
+                ref_prices.push(other_customers[neighbor_id as usize].wtp);
             }
         }
+        // for customer in other_customers {
+        //     if customer.id == self.id || customer.group == self.group {
+        //         continue;
+        //     } else {
+        //         if rand::thread_rng().gen::<f64>() < self.settings.global_wom_prob {
+        //             ref_prices.push(customer.wtp);
+        //         }
+        //     }
+        // }
 
         // Calculate average of reference prices and update erp
         if !ref_prices.is_empty() {
             let avg_price = ref_prices.iter().sum::<f64>() / ref_prices.len() as f64;
+            // println!("Customer {}: wtp: {}, avg_price: {}, ref_prices: {:?}", self.id, self.wtp as i32, avg_price as i32, ref_prices);
             self.erp = avg_price;
         } else if self.erp < 0.0 {
             // Initialize erp if it hasn't been set yet
@@ -121,12 +124,15 @@ impl<'a> Customer<'a> {
         if self.erp > self.irp {
             self.rp = self.irp;
         } else {
-            self.rp = self.settings.eta * self.erp + (1.0 - self.settings.eta) * self.irp;
+            let rp_after = self.settings.eta * self.erp + (1.0 - self.settings.eta) * self.irp;
+            // println!("rp: {}, erp: {}, irp: {}, rp_after: {}", self.rp, self.erp, self.irp, rp_after);
+            self.rp = rp_after
         }
     }
 
     // LABEL
     pub fn update_wtp(&mut self) {
+        // println!("rp: {}, wtp: {}", self.rp, self.wtp);
         if self.rp > self.wtp {
             self.wtp += (self.rp - self.wtp).powf(self.settings.alpha);
         } else {
@@ -149,6 +155,12 @@ impl<'a> Customer<'a> {
         let distr = Exp::new(rate as f32).unwrap();
         t + rng.sample::<f32, _>(distr)
     }
+
+    pub fn next_wom(&self, rng: &mut ThreadRng, t: f32) -> f32 {
+
+        let distr = Exp::new(0.1 as f32).unwrap();
+        t + rng.sample::<f32, _>(distr)
+    }
 }
 
 #[derive(Debug)]
@@ -169,10 +181,10 @@ pub struct ProblemSettings {
     pub k_neighbors: i32,
     pub p_intra: f64,
     pub p_inter: f64,
-    pub global_wom_prob: f64,
     pub max_price: f64,
     pub num_predicted_groups: i32,
     pub sigmoid_scale: f64,
+    pub wtp_adjustment_amplitude: f64,
 }
 
 pub fn init_simulation(
@@ -280,7 +292,7 @@ pub fn simulate_revenue<'a>(
             continue;
         }
 
-        event_history.push(event.0.clone());
+        // event_history.push(event.0.clone());
 
         let customer_idx = event.0.customer as usize;
 
@@ -295,7 +307,7 @@ pub fn simulate_revenue<'a>(
         ) as f64;
         
         let period = 10.0;
-        let amplitude = 0.0;
+        let amplitude = settings.wtp_adjustment_amplitude;
 
         let time_factor = amplitude * ((2.0 * std::f64::consts::PI * event.0.t.0 as f64 / period).sin());
 
@@ -311,7 +323,15 @@ pub fn simulate_revenue<'a>(
         customers[customer_idx].update_erp(&customers_copy);
 
 
-        if price > adjusted_wtp * 3.0 {
+        if (event.0.event == "wom") {
+            customers[customer_idx].update_erp(&customers_copy);
+            customers[customer_idx].update_rp();
+            customers[customer_idx].update_wtp();
+            continue
+        }
+
+
+        if price > adjusted_wtp * 1.5 {
             regret += adjusted_wtp;
             event_history.push(SimulationEvent::new(
                 &customers[customer_idx],
@@ -353,15 +373,28 @@ pub fn simulate_revenue<'a>(
                 adjusted_wtp
             ));
         } else {
-            let next_visit =
+            let next_visit_at =
                 customers[customer_idx].next_visit(&mut rng, event.0.t.0, event.0.price as f64);
-            let next_event = SimulationEvent::new(
+            let next_visit_event = SimulationEvent::new(
                 &customers[customer_idx],
-                OrderedFloat(next_visit),
+                OrderedFloat(next_visit_at),
                 "customer_arrival".to_string(),
                 price,
                 adjusted_wtp
             );
+
+            let next_wom_at =
+                customers[customer_idx].next_wom(&mut rng, event.0.t.0);
+            let next_wom_event = SimulationEvent::new(
+                &customers[customer_idx],
+                OrderedFloat(next_wom_at),
+                "wom".to_string(),
+                price,
+                adjusted_wtp
+            );
+
+            
+
             // algorithm.update_average_reward(
             //     customers[customer_idx].predicted_group as usize,
             //     visit_index as usize,
@@ -369,11 +402,20 @@ pub fn simulate_revenue<'a>(
             //     0.0,
             //     price as i32,
             // );
-            event_calendar.push(next_event, Reverse(OrderedFloat(next_visit)));
+            event_calendar.push(next_visit_event, Reverse(OrderedFloat(next_visit_at)));
+            event_calendar.push(next_wom_event, Reverse(OrderedFloat(next_wom_at)));
         }
         customers[customer_idx].update_irp(price);
         customers[customer_idx].update_rp();
         customers[customer_idx].update_wtp();
+
+        event_history.push(SimulationEvent::new(
+                &customers[customer_idx],
+                event.0.t,
+                "visit".to_string(),
+                price,
+                adjusted_wtp
+            ));
     }
 
     return SimulationResult {

@@ -5,7 +5,8 @@ use std::{collections::HashMap, fs::File};
 pub struct PSOSettings {
     pub num_iterations: i32,
     pub swarm_size: i32,
-    pub inertia_weight: f64,
+    pub inertia_weight_start: f64,
+    pub inertia_weight_end: f64,
     pub cognitive_coefficient: f64, // c1
     pub social_coefficient: f64,    // c2
     pub fn_evals: i32,
@@ -89,7 +90,7 @@ impl<'a> Particle<'a> {
         }
     }
 
-    fn update_velocity(&mut self, global_best: &PriceMatrix, settings: &PSOSettings) {
+    fn update_velocity(&mut self, global_best: &PriceMatrix, settings: &PSOSettings, current_inertia: f64) {
         let mut rng = rand::thread_rng();
 
         for (g, group_map) in self.velocity.0.iter_mut() {
@@ -98,7 +99,7 @@ impl<'a> Particle<'a> {
                     let r1 = rng.gen::<f64>();
                     let r2 = rng.gen::<f64>();
 
-                    velocities[t] = settings.inertia_weight * velocities[t]
+                    velocities[t] = current_inertia * velocities[t]
                         + settings.cognitive_coefficient
                             * r1
                             * (self.best_position.0[g][w][t] - self.position.0[g][w][t])
@@ -148,7 +149,7 @@ fn simulate_and_average<'a>(algorithm: &mut dyn Algorithm, settings: &'a Problem
 impl<'a> Algorithm for Particle<'a> {
     fn get_price(&mut self, group_id: usize, visit: usize, period: usize) -> i32 {
         let converted_period = period % 10;
-        self.position.get_price(group_id, visit, converted_period) as i32
+        self.position.get_price(group_id, 0, converted_period) as i32
     }
 
     fn update_average_reward(
@@ -169,8 +170,20 @@ fn log_iteration(
     particles: &Vec<Particle>,
     iteration: i32,
     settings: &PSOSettings,
+    current_inertia: f64,
 ) {
     for particle in particles {
+        // Calculate velocity norm
+        let mut velocity_norm_squared = 0.0;
+        for group_map in particle.velocity.0.values() {
+            for velocities in group_map.values() {
+                for &v in velocities {
+                    velocity_norm_squared += v * v;
+                }
+            }
+        }
+        let velocity_norm = velocity_norm_squared.sqrt();
+        
         writer
             .write_record(&[
                 run_id.to_string(),
@@ -179,10 +192,11 @@ fn log_iteration(
                 particle.current_fitness.to_string(),
                 particle.best_fitness.to_string(),
                 settings.swarm_size.to_string(),
-                settings.inertia_weight.to_string(),
+                settings.inertia_weight_end.to_string(),
                 settings.cognitive_coefficient.to_string(),
                 settings.social_coefficient.to_string(),
-                settings.fn_evals.to_string()
+                settings.fn_evals.to_string(),
+                velocity_norm.to_string(), // Add velocity norm to the log
             ])
             .unwrap();
     }
@@ -222,9 +236,14 @@ pub fn optimize_pricing<'a>(
 
     // Main PSO loop
     for iteration in 0..pso_settings.num_iterations {
+        // Calculate current inertia weight using linear decay
+        let progress = iteration as f64 / (pso_settings.num_iterations - 1) as f64;
+        let current_inertia = pso_settings.inertia_weight_start - 
+            progress * (pso_settings.inertia_weight_start - pso_settings.inertia_weight_end);
+        
         for particle in particles.iter_mut() {
-            // Update velocity and position
-            particle.update_velocity(global_best_position.as_ref().unwrap(), pso_settings);
+            // Update velocity and position with current inertia weight
+            particle.update_velocity(global_best_position.as_ref().unwrap(), pso_settings, current_inertia);
             particle.update_position();
 
             // Evaluate new position
@@ -247,10 +266,11 @@ pub fn optimize_pricing<'a>(
         }
         num_evals += particles.len() as i32;
 
-        log_iteration(run_id, &mut writer, &particles, num_evals, pso_settings);
+        // Pass the current inertia weight to the log function
+        log_iteration(run_id, &mut writer, &particles, num_evals, pso_settings, current_inertia);
         println!(
-            "Iteration {}: Best revenue = {}",
-            num_evals, global_best_fitness
+            "Iteration {}: Best revenue = {}, Inertia = {}",
+            num_evals, global_best_fitness, current_inertia
         );
     }
 
